@@ -1,3 +1,4 @@
+from matplotlib import pyplot as plt
 from torch.utils.data import Dataset
 import numpy as np
 import os
@@ -94,7 +95,7 @@ class RADIal(Dataset):
                     for i in range(len(self.statistics['input_mean'])):
                         radar_FFT[...,i] -= self.statistics['input_mean'][i]
                         radar_FFT[...,i] /= self.statistics['input_std'][i]
-                
+
             else:
                 radar_name = os.path.join(self.root_dir,'ADC_Data',"adc_{:06d}.npy".format(sample_id))
                 complex_adc = np.load(radar_name,allow_pickle=True)
@@ -103,7 +104,7 @@ class RADIal(Dataset):
                 input = mkl_fft.fft(np.multiply(range_fft,self.doppler_fft_coef),self.numChirps,axis=1)
                 # Shift doppler zero freqency bin to center of spectrum
                 radar_FFT = np.fft.fftshift(input,axes=1).astype(np.complex64)
-                radar_FFT = np.concatenate([input.real,input.imag],axis=2)
+                radar_FFT = np.concatenate([radar_FFT.real,radar_FFT.imag],axis=2)
 
                 if(self.statistics is not None):
                     for i in range(len(self.statistics['input_mean'])):

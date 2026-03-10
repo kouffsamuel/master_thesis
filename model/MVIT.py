@@ -242,6 +242,50 @@ class Detection_Header(nn.Module):
         reg = self.reghead(x)
 
         return torch.cat([cls, reg], dim=1)
+    
+class Detection_Header2(nn.Module):
+    def __init__(self, D, Hp, Wp, use_bn=True, reg_layer=2):
+        super(Detection_Header2, self).__init__()
+        self.D = D
+        self.Hp = Hp
+        self.Wp = Wp
+        self.use_bn = use_bn
+        bias = not use_bn
+
+        self.conv1 = conv3x3(D, 144, bias=bias)
+        self.bn1 = nn.BatchNorm2d(144)
+        self.conv2 = conv3x3(144, 96, bias=bias)
+        self.bn2 = nn.BatchNorm2d(96)
+        self.conv3 = conv3x3(96, 96, bias=bias)
+        self.bn3 = nn.BatchNorm2d(96)
+        self.conv4 = conv3x3(96, 96, bias=bias)
+        self.bn4 = nn.BatchNorm2d(96)
+
+        self.clshead = conv3x3(96, 1, bias=True)
+        self.reghead = conv3x3(96, reg_layer, bias=True)
+    
+    def forward(self, x):
+        B, Np, D = x.shape
+        x = x.permute(0,2,1).contiguous()
+        x = x.view(B,D, self.Hp, self.Wp)
+        x = F.interpolate(x, size=(128, 64), mode='bilinear', align_corners=False)  # (B, D, 128, 224)
+        
+        x = self.conv1(x)
+        if self.use_bn:
+            x = self.bn1(x)
+        x = self.conv2(x)
+        if self.use_bn:
+            x = self.bn2(x)
+        x = self.conv3(x)
+        if self.use_bn:
+            x = self.bn3(x)
+        x = self.conv4(x)
+        if self.use_bn:
+            x = self.bn4(x)
+
+        cls = torch.sigmoid(self.clshead(x))
+        reg = self.reghead(x)
+        return torch.cat([cls, reg], dim=1)
 
 class BasicBlock(nn.Module):
 
@@ -323,17 +367,17 @@ class RangeAngle_Decoder(nn.Module):
 
 
 class MViT(nn.Module):
-    def __init__(self):
+    def __init__(self, D, p, H, W, neuron, mha, layer, dropout):
         super().__init__()
         # ViT network parameters
-        self.D = 256  # dimension embedding
-        self.p = 16   # image patch size
-        self.H = 512  # image height
-        self.W = 256  # image width
-        self.neuron = 4 * self.D  # dimension of the MLP
-        self.mha = 8  # dimension of the multi-head attention
-        self.layer = 6   # number of layer in the encoder
-        self.dropout = 0.1  # dropout, if needed
+        self.D = D  # dimension embedding
+        self.p = p   # image patch size
+        self.H = H  # image height
+        self.W = W  # image width
+        self.neuron = neuron * self.D  # dimension of the MLP
+        self.mha = mha  # dimension of the multi-head attention
+        self.layer = layer   # number of layer in the encoder
+        self.dropout = dropout  # dropout, if needed
         self.n_antennas = 16
         self.Hp = self.H // self.p
         self.Wp = self.W // self.p
@@ -347,15 +391,24 @@ class MViT(nn.Module):
         # Positional encodings séparés
         self.pe = PositionalEncoding(d_model=self.D)  # nn.Parameter(torch.randn(1, self.Np, self.D))
 
-        self.encoders = nn.ModuleList([nn.ModuleList([
+        # self.encoders = nn.ModuleList([nn.ModuleList([
+        #     Encoder(
+        #         hidden_size=self.D,
+        #         ff_size=self.neuron,
+        #         multi_head=self.mha,
+        #         dropout_rate=self.dropout
+        #     )
+        #     for _ in range(self.layer)
+        # ]) for _ in range(self.n_antennas)])
+
+        self.encoder_layers = nn.ModuleList([
             Encoder(
                 hidden_size=self.D,
                 ff_size=self.neuron,
                 multi_head=self.mha,
                 dropout_rate=self.dropout
-            )
-            for _ in range(self.layer)
-        ]) for _ in range(self.n_antennas)])
+            )  for _ in range(self.layer)
+        ])
 
         self.feat_3 = nn.Conv2d(self.D, 16, kernel_size=1)
         self.feat_2 = nn.Conv2d(self.D, 192, kernel_size=1)
@@ -363,11 +416,12 @@ class MViT(nn.Module):
         self.feat_0 = nn.Conv2d(self.D, self.D, kernel_size=1)  # feat0 projection (identity)
 
         self.ra_decoder = RangeAngle_Decoder(D=self.D)
-        self.detection_head = Detection_Header(input_angle_size=224, reg_layer=2)
+        self.detection_head = Detection_Header(use_bn=True, reg_layer=2, input_angle_size=224)
+        #self.detection_head = Detection_Header2(self.D, self.Hp, self.Wp, True, 2)
 
     def forward(self, x, x_mask=None):
         B, T, H, W = x.shape  # batch
-        
+
         antenna_outputs = []
         for i in range(T//2):
             re = x[:, i, :, :]
@@ -379,12 +433,12 @@ class MViT(nn.Module):
             xi = self.pe(xi)  # (B, Np, D)
 
             # ---- Encoder ----
-            for layer in self.encoders[i]:
+            for layer in self.encoder_layers:
                 xi = layer(xi, x_mask)
             
             antenna_outputs.append(xi)
 
-        x = torch.stack(antenna_outputs, dim=1).mean(dim=1)
+        x = torch.stack(antenna_outputs, dim=1).mean(dim=1) # (B, 512, 256), (B, Np, D)
         
         x = x.permute(0, 2, 1).contiguous()  # (B, D, Np)
         y = x.view(B, self.D, self.Hp, self.Wp) # [4, 256, 32, 16]
@@ -401,7 +455,7 @@ class MViT(nn.Module):
         feat0 = self.feat_0(base_up4)                                                 # (B,   D, 128, 16)
 
         out = self.ra_decoder([feat0, feat1, feat2, feat3])  # (B, 256, 128, 224)
-        out = self.detection_head(out)                       # (B,   3, 128, 224)
+        out = self.detection_head(out)                      # (B,   3, 128, 224)
 
         return {"Detection": out}
 

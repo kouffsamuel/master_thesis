@@ -76,38 +76,16 @@ def run_FullEvaluation(net,loader,encoder,iou_threshold=0.5,config=None):
             outputs = net(inputs)
 
         out_obj = outputs['Detection'].detach().cpu().numpy().copy()
-        out_seg = torch.sigmoid(outputs['Segmentation']).detach().cpu().numpy().copy()
 
         labels_object = data[3]
-        label_freespace = data[2].numpy().copy()
 
-        for pred_obj,pred_map,true_obj,true_map in zip(out_obj,out_seg,labels_object,label_freespace):
+        for pred_obj,true_obj in zip(out_obj,labels_object):
 
             predictions['prediction']['objects'].append( np.asarray(encoder.decode(pred_obj,0.05)))
             predictions['label']['objects'].append(true_obj)
-
-            predictions['prediction']['freespace'].append(pred_map[0])
-            predictions['label']['freespace'].append(true_map)
-
 
         kbar.update(i)
 
     iou_list = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
     for iou_ in iou_list:
         results.append(GetFullMetrics(predictions['prediction']['objects'],predictions['label']['objects'],range_min=5,range_max=100,IOU_threshold=iou_))
-
-    mIoU = []
-    for i in range(len(predictions['prediction']['freespace'])):
-        # 0 to 124 means 0 to 50m
-        pred = predictions['prediction']['freespace'][i][:124].reshape(-1)>=0.5
-        label = predictions['label']['freespace'][i][:124].reshape(-1)
-
-        intersection = np.abs(pred*label).sum()
-        union = np.sum(label) + np.sum(pred) -intersection
-        iou = intersection /union
-        mIoU.append(iou)
-
-
-    mIoU = np.asarray(mIoU).mean()
-    print('------- Freespace Scores ------------')
-    print('  mIoU',mIoU*100,'%')

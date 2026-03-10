@@ -50,9 +50,9 @@ def CreateDataLoaders(dataset,config=None,seed=0):
         print('')
 
         # Optionally subset training data only (val/test stay full)
-        rng = np.random.default_rng(seed)
-        n_keep = int(len(train_dataset) * 0.2)
-        train_dataset = Subset(train_dataset, rng.choice(len(train_dataset), n_keep, replace=False))
+        # rng = np.random.default_rng(seed)
+        # n_keep = int(len(train_dataset) * 0.2)
+        # train_dataset = Subset(train_dataset, rng.choice(len(train_dataset), n_keep, replace=False))
         # create data_loaders
         train_loader = DataLoader(train_dataset, batch_size=config['train']['batch_size'], shuffle=True, num_workers=config['train']['num_workers'], pin_memory=True, collate_fn=RADIal_collate)
         val_loader = DataLoader(val_dataset, batch_size=config['val']['batch_size'], shuffle=False, num_workers=config['val']['num_workers'], pin_memory=True, collate_fn=RADIal_collate)

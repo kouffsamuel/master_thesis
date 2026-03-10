@@ -2,13 +2,13 @@ import sys
 sys.path.insert(0, '../')
 
 from dataset.dataset import RADIal
-from dataset.encoder import ra_encoder
+from dataset.encoder import rd_encoder
 
 import numpy as np
 
 
-geometry = {    "ranges": [512,896,1],
-                "resolution": [0.201171875,0.2],
+geometry = {    "ranges": [512,256],
+                "resolution": [0.201171875,0.1],
                 "size": 3}
 
 statistics = {  "input_mean":np.zeros(32),
@@ -16,11 +16,12 @@ statistics = {  "input_mean":np.zeros(32),
                 "reg_mean":np.zeros(3),
                 "reg_std":np.ones(3)}
 
-enc = ra_encoder(geometry = geometry,
+# Can also use ra_encoder, just replace rd_encoder with ra_encoder
+enc = rd_encoder(geometry = geometry,
                     statistics = statistics,
                     regression_layer = 2)
 
-dataset = RADIal(root_dir = r"C:\Users\James-PC\James\data\RADIal",
+dataset = RADIal(root_dir = "/Benson_DATA3/Public/RADIal/ready_to_use/RADIal",
                        statistics=None,
                        encoder=enc.encode,
                        difficult=True,perform_FFT='Custom_RD')
@@ -30,7 +31,7 @@ m=0
 s=0
 for i in range(len(dataset)):
     print(i,len(dataset))
-    radar_FFT, segmap,out_label,box_labels= dataset.__getitem__(i)
+    radar_FFT, segmap,out_label,box_labels, _= dataset.__getitem__(i)
 
     data = np.reshape(radar_FFT,(512*256,32))
 

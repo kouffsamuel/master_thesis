@@ -115,18 +115,18 @@ def process_predictions_FFT(batch_predictions, confidence_threshold=0.1, nms_thr
     return final_point_cloud_predictions
 
 def DisplayHMI(image, input,model_outputs,encoder,config,intermediate=None):
+    # Make sure the camera image is writable for OpenCV
+    image = image.copy()
 
     # Model outputs
     pred_obj = model_outputs['Detection'].detach().cpu().numpy().copy()[0]
-    out_seg = torch.sigmoid(model_outputs['Segmentation']).detach().cpu().numpy().copy()[0,0]
-
     # Decode the output detection map
     pred_obj = encoder.decode(pred_obj,0.05)
     pred_obj = np.asarray(pred_obj)
 
     # process prediction: polar to cartesian, NMS...
-    if(len(pred_obj)>0):
-        pred_obj = process_predictions_FFT(pred_obj,confidence_threshold=0.2)
+    if len(pred_obj) > 0:
+        pred_obj = process_predictions_FFT(pred_obj, confidence_threshold=0.2)
 
     ## FFT
     if config['data_mode'] != 'ADC':
@@ -136,31 +136,37 @@ def DisplayHMI(image, input,model_outputs,encoder,config,intermediate=None):
 
     PowerSpectrum = np.log10(FFT)
     # rescale
-    PowerSpectrum = (PowerSpectrum -PowerSpectrum.min())/(PowerSpectrum.max()-PowerSpectrum.min())*255
-    PowerSpectrum = cv2.cvtColor(PowerSpectrum.astype('uint8'),cv2.COLOR_GRAY2BGR)
+    PowerSpectrum = (PowerSpectrum - PowerSpectrum.min()) / (PowerSpectrum.max() - PowerSpectrum.min()) * 255
+    PowerSpectrum = cv2.cvtColor(PowerSpectrum.astype('uint8'), cv2.COLOR_GRAY2BGR)
 
-    ## Image
+    # Geometry information to map range (m) to RD row index
+    range_resolution = config['dataset']['geometry']['resolution'][0]
+    rd_h, rd_w = PowerSpectrum.shape[:2]
+
+    ## Image and RD overlays
     for box in pred_obj:
+        # box format after FFT post-processing:
+        # [score, x1,y1,x2,y2,x3,y3,x4,y4, range, angle]
+        score_and_box = box
         box = box[1:]
-        u1,v1 = worldToImage(-box[2],box[1],0)
-        u2,v2 = worldToImage(-box[0],box[1],1.6)
 
-        u1 = int(u1/2)
-        v1 = int(v1/2)
-        u2 = int(u2/2)
-        v2 = int(v2/2)
+        # Draw on camera image
+        u1, v1 = worldToImage(-box[2], box[1], 0)
+        u2, v2 = worldToImage(-box[0], box[1], 1.6)
 
-        image = cv2.rectangle(image, (u1,v1), (u2,v2), (0, 0, 255), 3)
+        u1 = int(u1 / 2)
+        v1 = int(v1 / 2)
+        u2 = int(u2 / 2)
+        v2 = int(v2 / 2)
 
-    RA_cartesian,_=polarTransform.convertToCartesianImage(np.moveaxis(out_seg,0,1),useMultiThreading=True,
-        initialAngle=0, finalAngle=np.pi,order=0,hasColor=False)
+        image = cv2.rectangle(image, (u1, v1), (u2, v2), (0, 0, 255), 3)
 
-    # Make a crop on the angle axis
-    RA_cartesian = RA_cartesian[:,256-100:256+100]
+        # Draw a point at detected range on RD PowerSpectrum
+        det_range_m = box[8]  # range in meters from RA_to_cartesian_box
+        center_row = int(det_range_m / range_resolution)
+        center_row = max(0, min(rd_h - 1, center_row))
 
-    RA_cartesian = np.asarray((RA_cartesian*255).astype('uint8'))
-    RA_cartesian = cv2.cvtColor(RA_cartesian, cv2.COLOR_GRAY2BGR)
-    RA_cartesian = cv2.resize(RA_cartesian,dsize=(400,512))
-    RA_cartesian=cv2.flip(RA_cartesian,flipCode=-1)
+        center_col = rd_w // 2
+        PowerSpectrum = cv2.circle(PowerSpectrum, (center_col, center_row), 3, (0, 0, 255), -1)
 
-    return np.hstack((PowerSpectrum,image[:512],RA_cartesian))
+    return np.hstack((PowerSpectrum, image[:PowerSpectrum.shape[0]]))

@@ -9,7 +9,7 @@ from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 from model.MVIT import MViT
 from dataset.dataset import RADIal
-from dataset.encoder import ra_encoder
+from dataset.encoder import rd_encoder
 from dataset.dataloader import CreateDataLoaders
 import pkbar
 import torch.optim as optim
@@ -37,7 +37,7 @@ def main(config=None, resume=None, exp_name=None):
 
     writer = SummaryWriter(os.path.join(output_folder, exp_name))
 
-    enc = ra_encoder(geometry = config['dataset']['geometry'],
+    enc = rd_encoder(geometry = config['dataset']['geometry'],
                         statistics = config['dataset']['statistics'],
                         regression_layer = 2)
 
@@ -47,14 +47,14 @@ def main(config=None, resume=None, exp_name=None):
     parameters = config['model']['vit']
     net = nn.DataParallel(MViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout']), device_ids=[0,1,2,3]) 
     net.to(device)
-    checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_RD_Shift.pth", weights_only=False, map_location='cpu')
-    model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('RA') or k.startswith('detection')}
-    net.load_state_dict(model_state_dict, strict=False)
+    # checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_RD_Shift.pth", weights_only=False, map_location='cpu')
+    # model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection')}
+    # net.load_state_dict(model_state_dict, strict=False)
 
     # Freeze RA Decoder and Detection Head at initialization
-    for name, param in net.named_parameters():
-        if name.startswith('module.ra') or name.startswith('module.detection'):
-            print(f"Loading {name}")
+    # for name, param in net.named_parameters():
+    #     if name.startswith('module.RA') or name.startswith('module.detection'):
+    #         print(f"Loading {name}")
 
     dataset = RADIal(root_dir = config['dataset']['root_dir'],
                         statistics= config['dataset']['statistics'],
@@ -96,7 +96,7 @@ def main(config=None, resume=None, exp_name=None):
 
     if resume:
         print('===========  Resume training  ==================:')
-        dict = torch.load(resume, weights_only=False)
+        dict = torch.load(resume)
         net.load_state_dict(dict['net_state_dict'])
         optimizer.load_state_dict(dict['optimizer'])
         scheduler.load_state_dict(dict['scheduler'])
@@ -167,7 +167,7 @@ def main(config=None, resume=None, exp_name=None):
         ## validation phase ##
         ######################
 
-        eval = run_evaluation(net,val_loader,enc,check_perf=(epoch>=10),
+        eval = run_evaluation(net,val_loader,enc,check_perf=(epoch>=5),
                                 detection_loss=pixor_loss,
                                 losses_params=config['losses'],config=config, device=device)
 
@@ -187,7 +187,7 @@ def main(config=None, resume=None, exp_name=None):
         filename = os.path.join(output_folder , exp_name , name_output_file)
 
         #Save best checkpoint based on F1-Score
-        if epoch >= 10 and eval['mAP'] + eval['mAR'] > 0 :
+        if epoch >= 5 and eval['mAP'] + eval['mAR'] > 0 :
             f1_score = 2 * (eval['mAP'] * eval['mAR']) / (eval['mAP'] + eval['mAR'])
             if f1_score > best_f1:
                 best_f1 = f1_score

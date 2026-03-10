@@ -2,7 +2,6 @@
     "name": "RD_MVIT",
     "seed":3,
     "data_mode":"Custom_RD",
-    "multiple_gpus": "False",
     "model": {
         "depths": [2,2,6,2],
         "channels": [32,40,48,56],
@@ -12,7 +11,17 @@
         "drop_rates": [0.0,0.0,0.0],
         "num_heads": [3,6,12,24],
         "DetectionHead": "True",
-        "SegmentationHead": "False"
+        "SegmentationHead": "False",
+        "vit":{
+            "D": 256,
+            "p": 16,
+            "H": 512,
+            "W": 256,
+            "neuron": 4,
+            "mha": 8,
+            "layer": 6,
+            "dropout": 0.2
+        }
     },
     "dataset": {
         "root_dir": "/Benson_DATA3/Public/RADIal/ready_to_use/RADIal/",
@@ -46,7 +55,7 @@
         "fct":"PixorLoss",
         "classification": "FocalLoss",
         "regression": "SmoothL1Loss",
-        "weight": [2,100,100]
+        "weight": [2,100]
     },
     "lr_scheduler": {
         "step_size": 10,
@@ -61,14 +70,14 @@
     },
     "num_epochs":50,
     "dataloader": {
-        "mode":"random",
+        "mode":"sequence",
         "split":[0.7,0.15,0.15],
         "train": {
-            "batch_size": 8,
+            "batch_size": 4,
             "num_workers": 4
     	},
         "val": {
-            "batch_size": 8,
+            "batch_size": 4,
             "num_workers": 4
         },
         "test": {
