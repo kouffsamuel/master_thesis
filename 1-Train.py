@@ -1,13 +1,15 @@
+import glob
 import os
 import json
 import argparse
+import re
 import torch
 import random
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
-from model.MVIT import MViT
+from model.RadViT import RadViT
 from dataset.dataset import RADIal
 from dataset.encoder import ra_encoder
 from dataset.dataloader import CreateDataLoaders
@@ -43,17 +45,17 @@ def main(config=None, resume=None, exp_name=None):
 
 
     # Create the model
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')
     parameters = config['model']['vit']
-    net = nn.DataParallel(MViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout']), device_ids=[0,1,2,3]) 
+    net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], data_mode=config['data_mode'])
     net.to(device)
     checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_RD_Shift.pth", weights_only=False, map_location='cpu')
-    model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('RA') or k.startswith('detection')}
+    model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection')}
     net.load_state_dict(model_state_dict, strict=False)
 
     # Freeze RA Decoder and Detection Head at initialization
     for name, param in net.named_parameters():
-        if name.startswith('module.ra') or name.startswith('module.detection'):
+        if name.startswith('module.detection'):
             print(f"Loading {name}")
 
     dataset = RADIal(root_dir = config['dataset']['root_dir'],
@@ -73,11 +75,12 @@ def main(config=None, resume=None, exp_name=None):
     step_size = int(config['lr_scheduler']['step_size'])
     gamma = float(config['lr_scheduler']['gamma'])
     num_epochs=int(config['num_epochs'])
+    warmup_epochs = 10
 
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
-    scheduler_warmup = lr_scheduler.LinearLR(optimizer, start_factor=1e-3, end_factor=1.0, total_iters=2)
-    scheduler_cosine = lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs - 2, eta_min=lr * 1e-2)
-    scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler_warmup, scheduler_cosine], milestones=[5])
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=0.05)
+    scheduler_warmup = lr_scheduler.LinearLR(optimizer, start_factor=1e-3, end_factor=1.0, total_iters=warmup_epochs)
+    scheduler_cosine = lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs - warmup_epochs, eta_min=lr * 1e-2)
+    scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler_warmup, scheduler_cosine], milestones=[warmup_epochs])
 
 
     print('===========  Optimizer  ==================:')
@@ -92,6 +95,14 @@ def main(config=None, resume=None, exp_name=None):
     global_step = 0
     history = {'train_loss':[],'val_loss':[],'lr':[],'mAP':[],'mAR':[]}
     best_f1 = 0
+    best_files = glob.glob(os.path.join(output_folder, exp_name, '*best.pth'))
+    for f in best_files:
+        pattern = re.search(r'_F1_(\d+\.\d+)_best\.pth$', f)
+        if pattern:
+           if float(pattern.group(1)) > best_f1:
+               best_f1 = float(pattern.group(1))
+               print(f"Found existing best checkpoint with F1-score: {best_f1:.4f}")
+
 
 
     if resume:
@@ -117,12 +128,11 @@ def main(config=None, resume=None, exp_name=None):
         net.train()
         running_loss = 0.0
         for i, data in enumerate(train_loader):
-
             if config['data_mode'] == 'ADC':
                 inputs = data[0].to(device).type(torch.complex64)
             else:
                 inputs = data[0].to(device).float()
-
+                
             label_map = data[1].to(device).float()
 
             # reset the gradient
@@ -159,14 +169,12 @@ def main(config=None, resume=None, exp_name=None):
 
 
         history['train_loss'].append(running_loss / len(train_loader.dataset))
-        scheduler.step()
-        history['lr'].append(scheduler.get_last_lr()[0])
 
 
         ######################
         ## validation phase ##
         ######################
-
+        net.eval()
         eval = run_evaluation(net,val_loader,enc,check_perf=(epoch>=10),
                                 detection_loss=pixor_loss,
                                 losses_params=config['losses'],config=config, device=device)
@@ -194,6 +202,9 @@ def main(config=None, resume=None, exp_name=None):
                 name_output_file = config['name']+'_AP_{:.4f}_AR_{:.4f}_F1_{:.4f}_best.pth'.format(eval['mAP'], eval['mAR'], f1_score)
                 filename = os.path.join(output_folder , exp_name , name_output_file)
                 torch.save(checkpoint,filename)
+        
+        scheduler.step()
+        history['lr'].append(scheduler.get_last_lr()[0])
 
         checkpoint={}
         checkpoint['net_state_dict'] = net.state_dict()
@@ -221,5 +232,6 @@ if __name__=='__main__':
     args = parser.parse_args()
 
     config = json.load(open(args.config))
+    torch.cuda.empty_cache()
     main(config, args.resume, args.name)
 

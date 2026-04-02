@@ -3,7 +3,7 @@ import json
 import argparse
 import torch
 import numpy as np
-from model.MVIT import MViT
+from model.RadViT import RadViT
 from dataset.dataset import RADIal
 from dataset.encoder import ra_encoder
 import cv2
@@ -20,7 +20,8 @@ def main(config, checkpoint_filename,difficult):
                         regression_layer = 2)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    net = nn.DataParallel(MViT(), device_ids=[0,1,2,3]) 
+    parameters = config['model']['vit']
+    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders']), device_ids=[0,1,2,3]) 
     net.to(device)
     dataset = RADIal(root_dir = config['dataset']['root_dir'],
                         statistics= config['dataset']['statistics'],
@@ -33,6 +34,9 @@ def main(config, checkpoint_filename,difficult):
 
 
     for data in dataset:
+        # Display GD and predictions on HMI
+        # Display bounding boxes on radar and camera image 
+
         # data is composed of [radar_FFT, segmap,out_label,box_labels,image]
         inputs = torch.tensor(data[0]).permute(2,0,1).to(device).unsqueeze(0)
         with torch.set_grad_enabled(False):
@@ -43,7 +47,7 @@ def main(config, checkpoint_filename,difficult):
             else:
                 intermediate = None
 
-        hmi = DisplayHMI(data[4], data[0],outputs,enc,config,intermediate)
+        hmi = DisplayHMI(data[4], data[0], data[3], outputs,enc,config,intermediate)
 
         cv2.imshow('FFTRadNet',hmi)
 

@@ -9,8 +9,8 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
 def RA_to_cartesian_box(data):
-    L = 4
-    W = 1.8
+    L = 4 # length of the bounding box
+    W = 1.8 # width of the bounding box 
 
     boxes = []
     for i in range(len(data)):

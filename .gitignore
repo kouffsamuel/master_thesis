@@ -209,4 +209,4 @@ __marimo__/
 /experiments/
 model/*.pth
 *.log
-
+/dataset/yolo26x.pt

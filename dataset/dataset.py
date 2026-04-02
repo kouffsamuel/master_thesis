@@ -99,14 +99,14 @@ class RADIal(Dataset):
             else:
                 radar_name = os.path.join(self.root_dir,'ADC_Data',"adc_{:06d}.npy".format(sample_id))
                 complex_adc = np.load(radar_name,allow_pickle=True)
-                complex_adc = complex_adc - np.mean(complex_adc, axis=(0,1))
-                range_fft = mkl_fft.fft(np.multiply(complex_adc,self.range_fft_coef),self.numSamplePerChirp,axis=0)
-                input = mkl_fft.fft(np.multiply(range_fft,self.doppler_fft_coef),self.numChirps,axis=1)
+                complex_adc = complex_adc - np.mean(complex_adc, axis=(0,1)) # DC removal
+                range_fft = mkl_fft.fft(np.multiply(complex_adc,self.range_fft_coef),self.numSamplePerChirp,axis=0) # Windowing and FFT along range dimension
+                input = mkl_fft.fft(np.multiply(range_fft,self.doppler_fft_coef),self.numChirps,axis=1) # Windowing and FFT along doppler dimension
                 # Shift doppler zero freqency bin to center of spectrum
                 radar_FFT = np.fft.fftshift(input,axes=1).astype(np.complex64)
                 radar_FFT = np.concatenate([radar_FFT.real,radar_FFT.imag],axis=2)
 
-                if(self.statistics is not None):
+                if(self.statistics is not None): # Normalize the data with the precomputed mean and std values
                     for i in range(len(self.statistics['input_mean'])):
                         radar_FFT[...,i] -= self.statistics['input_mean'][i]
                         radar_FFT[...,i] /= self.statistics['input_std'][i]

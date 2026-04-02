@@ -1,5 +1,5 @@
 {
-    "name": "ADC_Transformer_PerAntenna",
+    "name": "ADC_MVIT",
     "seed":3,
     "data_mode":"ADC",
     "model": {
@@ -11,7 +11,17 @@
         "drop_rates": [0.0,0.0,0.0],
         "num_heads": [3,6,12,24],
         "DetectionHead": "True",
-        "SegmentationHead": "True"
+        "vit":{
+            "D": 256,
+            "p": 16,
+            "H": 512,
+            "W": 256,
+            "neuron": 4,
+            "mha": 8,
+            "layer": 6,
+            "dropout": 0.1,
+            "n_encoders": 16
+        }
     },
     "dataset": {
         "root_dir": "/Benson_DATA3/Public/RADIal/ready_to_use/RADIal/",
@@ -30,8 +40,8 @@
     "losses": {
         "fct":"PixorLoss",
         "classification": "FocalLoss",
-        "regression": "smoothL1Loss",
-        "weight": [2,100,100]
+        "regression": "SmoothL1Loss",
+        "weight": [2,100]
     },
     "lr_scheduler": {
         "step_size": 10,
@@ -42,7 +52,7 @@
         "eta": 0.01
     },
     "optimizer": {
-        "lr": 1e-4
+        "lr": 0.0001
     },
     "num_epochs":150,
     "dataloader": {

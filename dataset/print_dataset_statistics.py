@@ -7,8 +7,8 @@ from dataset.encoder import rd_encoder
 import numpy as np
 
 
-geometry = {    "ranges": [512,256],
-                "resolution": [0.201171875,0.1],
+geometry = {    "ranges": [512,896,1],
+                "resolution": [0.201171875,0.2],
                 "size": 3}
 
 statistics = {  "input_mean":np.zeros(32),

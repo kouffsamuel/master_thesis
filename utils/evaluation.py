@@ -8,8 +8,6 @@ def run_evaluation(net,loader,encoder,check_perf=False, detection_loss=None,loss
 
     metrics = Metrics()
     metrics.reset()
-
-    net.eval()
     running_loss = 0.0
 
     kbar = pkbar.Kbar(target=len(loader), width=20, always_stateful=False)
@@ -18,8 +16,7 @@ def run_evaluation(net,loader,encoder,check_perf=False, detection_loss=None,loss
 
         # input, out_label,segmap,labels
         if config['data_mode'] == 'ADC':
-            inputs = data[0].to(device).type(torch.complex64)
-
+                inputs = data[0].to(device).type(torch.complex64)
         else:
             inputs = data[0].to(device).float()
 
@@ -65,12 +62,7 @@ def run_FullEvaluation(net,loader,encoder,iou_threshold=0.5,config=None):
     print('Generating Predictions...')
     predictions = {'prediction':{'objects':[],'freespace':[]},'label':{'objects':[],'freespace':[]}}
     for i, data in enumerate(loader):
-        # input, out_label,segmap,labels
-        if config['data_mode'] == 'ADC':
-            inputs = data[0].to('cuda').type(torch.complex64)
-
-        else:
-            inputs = data[0].to('cuda').float()
+        inputs = data[0].to('cuda').float()
 
         with torch.set_grad_enabled(False):
             outputs = net(inputs)

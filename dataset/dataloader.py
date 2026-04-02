@@ -3,8 +3,16 @@ from torch.utils.data import Dataset, DataLoader, DistributedSampler, random_spl
 import numpy as np
 import torch
 
-Sequences = {'Validation':['RECORD@2020-11-22_12.49.56','RECORD@2020-11-22_12.11.49','RECORD@2020-11-22_12.28.47','RECORD@2020-11-21_14.25.06'],
-            'Test':['RECORD@2020-11-22_12.45.05','RECORD@2020-11-22_12.25.47','RECORD@2020-11-22_12.03.47','RECORD@2020-11-22_12.54.38']}
+Sequences = {'Validation':
+             ['RECORD@2020-11-22_12.49.56',
+              'RECORD@2020-11-22_12.11.49',
+              'RECORD@2020-11-22_12.28.47',
+              'RECORD@2020-11-21_14.25.06'],
+            'Test':[
+                'RECORD@2020-11-22_12.45.05',
+                'RECORD@2020-11-22_12.25.47',
+                'RECORD@2020-11-22_12.03.47',
+                'RECORD@2020-11-22_12.54.38']}
 
 def RADIal_collate(batch):
     images = []
@@ -49,10 +57,6 @@ def CreateDataLoaders(dataset,config=None,seed=0):
         print('      Test:', len(test_dataset),' indexes...',test_dataset.indices[:3])
         print('')
 
-        # Optionally subset training data only (val/test stay full)
-        # rng = np.random.default_rng(seed)
-        # n_keep = int(len(train_dataset) * 0.2)
-        # train_dataset = Subset(train_dataset, rng.choice(len(train_dataset), n_keep, replace=False))
         # create data_loaders
         train_loader = DataLoader(train_dataset, batch_size=config['train']['batch_size'], shuffle=True, num_workers=config['train']['num_workers'], pin_memory=True, collate_fn=RADIal_collate)
         val_loader = DataLoader(val_dataset, batch_size=config['val']['batch_size'], shuffle=False, num_workers=config['val']['num_workers'], pin_memory=True, collate_fn=RADIal_collate)

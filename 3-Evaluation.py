@@ -4,7 +4,6 @@ import argparse
 import torch
 import random
 import numpy as np
-from model.MVIT import MViT
 from dataset.dataset import RADIal
 from dataset.encoder import ra_encoder
 from dataset.dataloader import CreateDataLoaders
@@ -12,7 +11,8 @@ import pkbar
 import torch.nn.functional as F
 from utils.evaluation import run_FullEvaluation
 import torch.nn as nn
-
+from model.RadViT import RadViT
+#from model.RadViT_newconfig import RadViT
 def main(config, checkpoint,difficult):
 
     # Setup random seed
@@ -27,12 +27,13 @@ def main(config, checkpoint,difficult):
                         regression_layer = 2)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    net = nn.DataParallel(MViT(), device_ids=[0,1,2,3]) 
+    parameters = config['model']['vit']
+    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders']), device_ids=[0,1,2,3]) 
     net.to(device)
     dataset = RADIal(root_dir = config['dataset']['root_dir'],
                         statistics= config['dataset']['statistics'],
                         encoder=enc.encode,
-                        difficult=True,perform_FFT=config['data_mode'])
+                        difficult=difficult,perform_FFT=config['data_mode'])
 
     train_loader, val_loader, test_loader = CreateDataLoaders(dataset,config['dataloader'],config['seed'])
 

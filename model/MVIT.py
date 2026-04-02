@@ -4,182 +4,7 @@ import torch
 from torch.autograd import Variable
 import math
 
-
-# Projection des vecteurs de dimensions inp_size vers la dimension d_model
-class LinearEmbedding(nn.Module):
-    def __init__(self, inp_size, d_model):
-        super(LinearEmbedding, self).__init__()
-        self.lut = nn.Linear(inp_size, d_model)
-        self.d_model = d_model
-
-    def forward(self, x):
-        return self.lut(x) * math.sqrt(self.d_model)
-
-
-# Positional encoding
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
-        super(PositionalEncoding, self).__init__()
-
-        self.len = max_len
-        # Créer une matrice de taille (max_len, d_model) avec des valeurs de zéro
-        pe = torch.zeros(max_len, d_model)
-
-        # Créer un vecteur représentant les positions (0, 1, 2, ..., max_len-1)
-        position = torch.arange(0, max_len).unsqueeze(1).float()
-
-        # Calculer les angles pour chaque position et chaque dimension
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model))
-
-        # Appliquer les formules de sinus et cosinus aux positions pour chaque dimension
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-
-        # Ajouter une dimension supplémentaire pour l'utiliser avec les batchs (batch_size, max_len, d_model)
-        pe = pe.unsqueeze(0)
-
-        # Enregistre `pe` comme Variable pour les anciennes versions de PyTorch
-        self.register_buffer('pe', Variable(pe, requires_grad=False))  # permet de gerer le device
-
-    def forward(self, x):
-        # Ajouter l'encodage positionnel aux embeddings des tokens en entrée
-        x = x + self.pe[:, :x.shape[1], :]
-        return x
-
-
-class LayerNorm(nn.Module):  # couche Add and norm
-    def __init__(self, size, eps=1e-6):
-        super(LayerNorm, self).__init__()
-        self.norm = nn.LayerNorm(size, eps=eps)
-
-    def forward(self, x):
-        return self.norm(x)
-
-
-class FC(nn.Module):  # fully connected layer du MLP
-    def __init__(self, in_size, out_size, dropout_r, use_relu):
-        super(FC, self).__init__()
-        self.dropout_r = dropout_r
-        self.use_relu = use_relu
-
-        self.linear = nn.Linear(in_size, out_size)
-        self.relu = nn.ReLU(inplace=True)  # inplace permet de gagner de la memoire en "overwrite" l input
-        if dropout_r > 0:
-            self.dropout = nn.Dropout(dropout_r)
-
-    def forward(self, x):
-        x = self.linear(x)
-
-        if self.use_relu:
-            x = self.relu(x)
-
-        if self.dropout_r > 0:
-            x = self.dropout(x)
-
-        return x
-
-
-class MLP(nn.Module):
-    def __init__(self, in_size, mid_size, out_size, dropout_r, use_relu):
-        super(MLP, self).__init__()
-
-        self.fc = FC(in_size, mid_size, dropout_r=dropout_r, use_relu=use_relu)
-        self.linear = nn.Linear(mid_size, out_size)
-
-    def forward(self, x):
-        return self.linear(self.fc(x))
-
-
-# ------------------------------
-# ---- Multi-Head Attention ----
-# ------------------------------
-
-class MultiHeadAttention(nn.Module):
-    def __init__(self, hidden_dimension, multi_head, dropout_rate):
-        super(MultiHeadAttention, self).__init__()
-        self.mha = multi_head
-        self.hidden_dimension = hidden_dimension
-
-        self.linear_v = nn.Linear(hidden_dimension, hidden_dimension)
-        self.linear_k = nn.Linear(hidden_dimension, hidden_dimension)
-        self.linear_q = nn.Linear(hidden_dimension, hidden_dimension)
-        self.linear_merge = nn.Linear(hidden_dimension, hidden_dimension)
-        self.dropout = nn.Dropout(dropout_rate)
-        self.dropout2 = nn.Dropout(dropout_rate)  # Added
-
-    def forward(self, v, k, q, mask):
-        n_batches = q.size(0)
-        d_k = self.hidden_dimension // self.mha
-
-        # 1: Split V, K, Q into B x N_head x Seq length x D / N_head
-        v = self.linear_v(v).view(n_batches, -1, self.mha, d_k).transpose(1, 2)
-        k = self.linear_k(k).view(n_batches, -1, self.mha, d_k).transpose(1, 2)
-        q = self.linear_q(q).view(n_batches, -1, self.mha, d_k).transpose(1, 2)
-
-        # 2: Compute the attention
-        atted = self.att(v, k, q, mask)
-
-        # 3: Concat each head to form B x Seq length x D
-        atted = atted.transpose(1, 2).contiguous().view(n_batches, -1, d_k * self.mha)
-
-        # 4: Apply a final layer
-        atted = self.linear_merge(atted)
-        atted = self.dropout2(atted)  # Added
-        return atted
-
-    def att(self, value, key, query, mask):
-        d_k = query.size(-1)
-        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
-        if mask is not None:
-            mask = mask.unsqueeze(1)
-            scores = scores.masked_fill(mask == 0, -1e9)
-        att_map = F.softmax(scores, dim=-1)
-        att_map = self.dropout(att_map)
-        return torch.matmul(att_map, value)
-
-
-# ---------------------------
-# ---- Feed Forward Nets ----
-# ---------------------------
-
-class FFN(nn.Module):
-    def __init__(self, hidden_dimension, ff_dimension, dropout_rate):
-        super(FFN, self).__init__()
-        self.mlp = MLP(
-            in_size=hidden_dimension,
-            mid_size=ff_dimension,
-            out_size=hidden_dimension,
-            dropout_r=dropout_rate,
-            use_relu=True
-        )
-
-    def forward(self, x):
-        return self.mlp(x)
-
-
-class Encoder(nn.Module):
-    def __init__(self, hidden_size, ff_size, multi_head, dropout_rate):
-        super(Encoder, self).__init__()
-        self.mhatt = MultiHeadAttention(hidden_dimension=hidden_size,
-                                        multi_head=multi_head,
-                                        dropout_rate=dropout_rate)
-        self.ffn = FFN(hidden_dimension=hidden_size,
-                       ff_dimension=ff_size,
-                       dropout_rate=dropout_rate)
-
-        self.dropout1 = nn.Dropout(dropout_rate)
-        self.norm1 = LayerNorm(hidden_size)
-
-        self.dropout2 = nn.Dropout(dropout_rate)
-        self.norm2 = LayerNorm(hidden_size)
-
-    def forward(self, x, x_mask):
-        y = self.norm1(x + self.dropout1(self.mhatt(x, x, x, x_mask)))
-        y = self.norm2(y + self.dropout2(self.ffn(y)))
-        return y
-
-
-
+from model.ViT import Encoder, PatchEmbed
 def conv3x3(in_planes, out_planes, stride=1, bias=False):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -237,7 +62,7 @@ class Detection_Header(nn.Module):
         x = self.conv4(x)
         if self.use_bn:
             x = self.bn4(x)
-
+    
         cls = torch.sigmoid(self.clshead(x))
         reg = self.reghead(x)
 
@@ -360,106 +185,98 @@ class RangeAngle_Decoder(nn.Module):
         out = self.conv_block2(out)                      # (B,256, 128, 224)
 
         return out
-    
-# -------------------------
-# ---- Main Net Model ----
-# -------------------------
 
-
-class MViT(nn.Module):
+class AntennaEncoder(nn.Module):
     def __init__(self, D, p, H, W, neuron, mha, layer, dropout):
         super().__init__()
-        # ViT network parameters
-        self.D = D  # dimension embedding
-        self.p = p   # image patch size
-        self.H = H  # image height
-        self.W = W  # image width
-        self.neuron = neuron * self.D  # dimension of the MLP
-        self.mha = mha  # dimension of the multi-head attention
-        self.layer = layer   # number of layer in the encoder
-        self.dropout = dropout  # dropout, if needed
-        self.n_antennas = 16
-        self.Hp = self.H // self.p
-        self.Wp = self.W // self.p
+        self.Hp = H // p
+        self.Wp = W // p
 
-        # Nombre total de patchs par image
-        self.Np = self.Hp * self.Wp
+        self.patch_embed = PatchEmbed(patch_size=(p,p), in_chans=2, embed_dim=D)
+        self.pe = PositionalEncoding(D)
 
-        # Embedding linéaire de chaque patch
-        self.patch_embed = nn.Linear(2 *self.p ** 2, self.D)
+        self.encoder = nn.ModuleList([Encoder(D, neuron * D, mha, dropout) for _ in range(layer)])
 
-        # Positional encodings séparés
-        self.pe = PositionalEncoding(d_model=self.D)  # nn.Parameter(torch.randn(1, self.Np, self.D))
+    def forward(self, re, im):
+        x = torch.stack([re, im], dim=1) 
+        x = self.patch_embed(x)
+        x = self.pe(x.flatten(2).transpose(1, 2))
+        for layer in self.encoder:
+            x = layer(x, None)
+        return x
 
-        # self.encoders = nn.ModuleList([nn.ModuleList([
-        #     Encoder(
-        #         hidden_size=self.D,
-        #         ff_size=self.neuron,
-        #         multi_head=self.mha,
-        #         dropout_rate=self.dropout
-        #     )
-        #     for _ in range(self.layer)
-        # ]) for _ in range(self.n_antennas)])
-
-        self.encoder_layers = nn.ModuleList([
-            Encoder(
-                hidden_size=self.D,
-                ff_size=self.neuron,
-                multi_head=self.mha,
-                dropout_rate=self.dropout
-            )  for _ in range(self.layer)
+class FusionTransformer(nn.Module):
+    def __init__(self, D, mha, layer, dropout, Nrx):
+        super().__init__()
+        self.Nrx = Nrx
+        self.antenna_pe = nn.Parameter(torch.randn(1, Nrx, 1, D))
+        self.fusion_layers = nn.ModuleList([
+            Encoder(D, D*4, mha, dropout) for _ in range(layer)
         ])
+        self.fusion_proj = nn.Linear(Nrx * D, D)
 
-        self.feat_3 = nn.Conv2d(self.D, 16, kernel_size=1)
-        self.feat_2 = nn.Conv2d(self.D, 192, kernel_size=1)
-        self.feat_1 = nn.Conv2d(self.D, 160, kernel_size=1)
-        self.feat_0 = nn.Conv2d(self.D, self.D, kernel_size=1)  # feat0 projection (identity)
+    def forward(self, antenna_tokens):
+        B, Np, D = antenna_tokens[0].shape
 
-        self.ra_decoder = RangeAngle_Decoder(D=self.D)
-        self.detection_head = Detection_Header(use_bn=True, reg_layer=2, input_angle_size=224)
-        #self.detection_head = Detection_Header2(self.D, self.Hp, self.Wp, True, 2)
+        x = torch.stack(antenna_tokens, dim=1)    # (B, Nrx, Np, D)
+        x = x + self.antenna_pe                   # (B, Nrx, Np, D)
+
+        x = x.permute(0, 2, 1, 3).contiguous()   # (B, Np, Nrx, D)
+        x = x.view(B * Np, self.Nrx, D)          # (B*Np, Nrx, D)
+
+        for layer in self.fusion_layers:
+            x = layer(x, None)                    # (B*Np, Nrx, D)
+
+        x = x.reshape(B * Np, self.Nrx * D)
+        x = self.fusion_proj(x)                   # (B*Np, D)
+        x = x.view(B, Np, D)                      # (B, Np, D)
+        return x
+
+class MViT(nn.Module):
+    def __init__(self, D, p, H, W, neuron, mha, layer, dropout, Nrx=16):
+        super().__init__()
+        self.Nrx = Nrx
+        self.Hp = H // p 
+        self.Wp = W // p
+        self.D = D
+
+        self.antenna_encoder = AntennaEncoder(D, p, H, W, neuron, mha, layer, dropout)
+        self.fusion = FusionTransformer(D, mha, layer, dropout, Nrx=Nrx)
+
+        self.down  = nn.Conv2d(D,   16, kernel_size=3, stride=(2,1), padding=1)
+        self.proj  = nn.Conv2d(D,  192, kernel_size=1)
+        self.up2   = nn.ConvTranspose2d(D, 160, kernel_size=(2,1), stride=(2,1))
+        self.up4   = nn.ConvTranspose2d(160,   D, kernel_size=(2,1), stride=(2,1))
+
+        self.ra_decoder     = RangeAngle_Decoder(D=D)
+        self.detection_head = Detection_Header(
+            use_bn=True, reg_layer=2, input_angle_size=224
+        )
 
     def forward(self, x, x_mask=None):
-        B, T, H, W = x.shape  # batch
+        # x: (B, 2*NRx, H, W) — re puis im pour chaque Rx
+        B = x.shape[0]
 
-        antenna_outputs = []
-        for i in range(T//2):
-            re = x[:, i, :, :]
-            im = x[:, i + T//2, :, :]   
-            re = re.view(B, self.Np, self.p * self.p)  # (B, Np, p²)
-            im = im.view(B, self.Np, self.p * self.p)  # (B, Np, p²)
-            xi = torch.cat([re, im], dim=-1)           # (B, Np, 2*p²)
-            xi = self.patch_embed(xi)  # (B, Np, D) # 256/26 = 16 tokens 
-            xi = self.pe(xi)  # (B, Np, D)
+        # ---- Encoder per antena ----
+        antenna_tokens = []
+        for i in range(self.Nrx):
+            re = x[:, i, :, :]   # (B, H, W)
+            im = x[:, i + self.Nrx, :, :]   # (B, H, W)
+            tokens = self.antenna_encoder(re, im)  # (B, Np, D)
+            antenna_tokens.append(tokens)
 
-            # ---- Encoder ----
-            for layer in self.encoder_layers:
-                xi = layer(xi, x_mask)
-            
-            antenna_outputs.append(xi)
+        # ---- Fusion inter-antennes ----
+        fused = self.fusion(antenna_tokens)  # (B, Np, D)
 
-        x = torch.stack(antenna_outputs, dim=1).mean(dim=1) # (B, 512, 256), (B, Np, D)
-        
-        x = x.permute(0, 2, 1).contiguous()  # (B, D, Np)
-        y = x.view(B, self.D, self.Hp, self.Wp) # [4, 256, 32, 16]
+        # ---- Reshape + multi-scale ----
+        y = fused.permute(0,2,1).contiguous()
+        y = y.view(B, self.D, self.Hp, self.Wp)
 
-        # ---- Multi-scale features ----
+        feat3 = self.down(y)      # (B,  16, Hp/2, Wp)
+        feat2 = self.proj(y)      # (B, 192, Hp,   Wp)
+        feat1 = self.up2(y)       # (B, 160, Hp*2, Wp)
+        feat0 = self.up4(feat1)   # (B,   D, Hp*4, Wp)
 
-        # y: (B, D, 32, 16)
-        feat2 = self.feat_2(y)                                                        # (B, 192,  32, 16)
-        base_half = F.avg_pool2d(y, kernel_size=(2, 1))
-        feat3 = self.feat_3(base_half)                                                # (B,  16,  16, 16)
-        base_up2 = F.interpolate(y, size=(64,  16), mode='bilinear', align_corners=False)
-        feat1 = self.feat_1(base_up2)                                                 # (B, 160,  64, 16)
-        base_up4 = F.interpolate(y, size=(128, 16), mode='bilinear', align_corners=False)
-        feat0 = self.feat_0(base_up4)                                                 # (B,   D, 128, 16)
-
-        out = self.ra_decoder([feat0, feat1, feat2, feat3])  # (B, 256, 128, 224)
-        out = self.detection_head(out)                      # (B,   3, 128, 224)
-
+        out = self.ra_decoder([feat0, feat1, feat2, feat3])
+        out = self.detection_head(out)
         return {"Detection": out}
-
-
-
-
-

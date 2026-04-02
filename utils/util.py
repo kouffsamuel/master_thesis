@@ -40,6 +40,9 @@ def RA_to_cartesian_box(data):
     return boxes
 
 def perform_nms(valid_class_predictions, valid_box_predictions, nms_threshold):
+    # Remove redudant detections. Strongly overlapping boxes lower-confidence boxes are supressed
+    # while isolated or weakly overlapping boxes remain. The same mask is applied to both box
+    # and score arrays so theu stay aligned. 
 
     # sort the detections such that the entry with the maximum confidence score is at the top
     sorted_indices = np.argsort(valid_class_predictions)[::-1]
@@ -114,19 +117,18 @@ def process_predictions_FFT(batch_predictions, confidence_threshold=0.1, nms_thr
 
     return final_point_cloud_predictions
 
-def DisplayHMI(image, input,model_outputs,encoder,config,intermediate=None):
-    # Make sure the camera image is writable for OpenCV
-    image = image.copy()
-
+def DisplayHMI(image, input, box_labels, model_outputs,encoder,config,intermediate=None):
+    image_copy = image.copy()
     # Model outputs
     pred_obj = model_outputs['Detection'].detach().cpu().numpy().copy()[0]
+
     # Decode the output detection map
     pred_obj = encoder.decode(pred_obj,0.05)
     pred_obj = np.asarray(pred_obj)
 
     # process prediction: polar to cartesian, NMS...
-    if len(pred_obj) > 0:
-        pred_obj = process_predictions_FFT(pred_obj, confidence_threshold=0.2)
+    if(len(pred_obj)>0):
+        pred_obj = process_predictions_FFT(pred_obj,confidence_threshold=0.5)
 
     ## FFT
     if config['data_mode'] != 'ADC':
@@ -136,37 +138,33 @@ def DisplayHMI(image, input,model_outputs,encoder,config,intermediate=None):
 
     PowerSpectrum = np.log10(FFT)
     # rescale
-    PowerSpectrum = (PowerSpectrum - PowerSpectrum.min()) / (PowerSpectrum.max() - PowerSpectrum.min()) * 255
-    PowerSpectrum = cv2.cvtColor(PowerSpectrum.astype('uint8'), cv2.COLOR_GRAY2BGR)
+    PowerSpectrum = (PowerSpectrum -PowerSpectrum.min())/(PowerSpectrum.max()-PowerSpectrum.min())*255
+    PowerSpectrum = cv2.cvtColor(PowerSpectrum.astype('uint8'),cv2.COLOR_GRAY2BGR)
 
-    # Geometry information to map range (m) to RD row index
-    range_resolution = config['dataset']['geometry']['resolution'][0]
-    rd_h, rd_w = PowerSpectrum.shape[:2]
-
-    ## Image and RD overlays
+    ## Image
     for box in pred_obj:
-        # box format after FFT post-processing:
-        # [score, x1,y1,x2,y2,x3,y3,x4,y4, range, angle]
-        score_and_box = box
-        box = box[1:]
+        box = box[1:] # Keep 8 coordinates (+ range and angle), remove confidence score
+        # box = [x1, y1, x2, y2, x3, y3, x4, y4, range, angle]
+        u1,v1 = worldToImage(-box[2],box[1],0)
+        u2,v2 = worldToImage(-box[0],box[1],1.6)
 
-        # Draw on camera image
-        u1, v1 = worldToImage(-box[2], box[1], 0)
-        u2, v2 = worldToImage(-box[0], box[1], 1.6)
+        u1 = int(u1/2)
+        v1 = int(v1/2)
+        u2 = int(u2/2)
+        v2 = int(v2/2)
 
-        u1 = int(u1 / 2)
-        v1 = int(v1 / 2)
-        u2 = int(u2 / 2)
-        v2 = int(v2 / 2)
+        image_copy = cv2.rectangle(image_copy, (u1,v1), (u2,v2), (0, 0, 255), 2)
+        
+    ## Plotting GT on image
+    for box in box_labels:
+        box = box[-4:] # Keep coordinates
 
-        image = cv2.rectangle(image, (u1, v1), (u2, v2), (0, 0, 255), 3)
+        u1 = int(box[0]/2)
+        v1 = int(box[1]/2)
+        u2 = int(box[2]/2)
+        v2 = int(box[3]/2)
 
-        # Draw a point at detected range on RD PowerSpectrum
-        det_range_m = box[8]  # range in meters from RA_to_cartesian_box
-        center_row = int(det_range_m / range_resolution)
-        center_row = max(0, min(rd_h - 1, center_row))
+        image_copy = cv2.rectangle(image_copy, (u1,v1), (u2,v2), (0, 255, 0), 2)
 
-        center_col = rd_w // 2
-        PowerSpectrum = cv2.circle(PowerSpectrum, (center_col, center_row), 3, (0, 0, 255), -1)
 
-    return np.hstack((PowerSpectrum, image[:PowerSpectrum.shape[0]]))
+    return np.hstack((PowerSpectrum,image_copy[:512]))
