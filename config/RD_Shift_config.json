@@ -56,7 +56,7 @@
         "fct":"PixorLoss",
         "classification": "FocalLoss",
         "regression": "SmoothL1Loss",
-        "weight": [2,100]
+        "weight": [2,100, 5]
     },
     "lr_scheduler": {
         "step_size": 10,

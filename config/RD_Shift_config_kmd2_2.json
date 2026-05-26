@@ -1,0 +1,78 @@
+{
+    "name": "RD_MVIT_KMD2",
+    "seed":3,
+    "data_mode":"Custom_RD",
+    "model": {
+        "depths": [2,2,6,2],
+        "channels": [32,40,48,56],
+        "patch_size": 2,
+        "in_chans": 32,
+        "embed_dim": 48,
+        "drop_rates": [0.0,0.0,0.0],
+        "num_heads": [3,6,12,24],
+        "DetectionHead": "True",
+        "SegmentationHead": "False",
+        "vit":{
+            "D": 256,
+            "p": 16,
+            "H": 256,
+            "W": 256,
+            "neuron": 4,
+            "mha": 8,
+            "layer": 6,
+            "dropout": 0.2,
+            "n_encoders": 1
+        }
+    },
+    "dataset": {
+        "root_dir": "/Benson_DATA3/Public/RADIal/ready_to_use/RADIal/",
+        "geometry":{
+            "ranges": [256,896,1],
+            "resolution": [0.27498872, 0.1],
+            "size": 3
+        },
+        "statistics":{
+            "input_mean": [-0.0002099,   0.00017732,  0.00139532, -0.00068679,  0.00015062,  0.00120929],
+            "input_std":[0.75152896, 0.74185158, 0.74241357, 0.78624761, 0.76468114, 0.74002812],
+            "reg_mean":[0.4048094369863972,0.3997392847799934],
+            "reg_std":[0.6968599580482511,0.6942950877813826]
+           }
+    },
+    "losses": {
+        "fct":"PixorLoss",
+        "classification": "FocalLoss",
+        "regression": "SmoothL1Loss",
+        "weight": [2,100, 1]
+    },
+    "lr_scheduler": {
+        "step_size": 10,
+        "gamma": 0.9
+    },
+    "asam": {
+        "rho": 0.5,
+        "eta": 0.01
+    },
+    "optimizer": {
+        "lr": 1e-4
+    },
+    "num_epochs":100,
+    "dataloader": {
+        "mode":"sequence",
+        "split":[0.7,0.15,0.15],
+        "train": {
+            "batch_size": 4,
+            "num_workers": 4
+    	},
+        "val": {
+            "batch_size": 4,
+            "num_workers": 4
+        },
+        "test": {
+            "batch_size": 1,
+            "num_workers": 1
+        }
+    },
+    "output": {
+	"dir": "/home/skouff/master_thesis/experiments/"
+    }
+}

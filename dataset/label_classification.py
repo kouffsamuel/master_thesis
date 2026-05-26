@@ -1,99 +1,324 @@
 from matplotlib import pyplot as plt
-from matplotlib.patches import Rectangle
+import matplotlib.patches as mpatches
+from matplotlib.widgets import Button
 import pandas as pd
 import numpy as np
 import sys
 from tqdm import tqdm
 
-from shapely import Polygon 
 sys.path.append('/home/skouff/')
 sys.path.append('/home/skouff/master_thesis/')
 from RADIal.DBReader import SyncReader
 from ultralytics import YOLO
 import os
 
+# ─────────────────────────────────────────────
+#  CONFIG
+# ─────────────────────────────────────────────
+AUTO_DELAY_MS = 1200        # délai auto-avance (ms) — ajuste à ta convenance
+LABELS_CSV     = '/Benson_DATA3/Public/RADIal/ready_to_use/RADIal/labels.csv'
+OUTPUT_CSV     = '/Benson_DATA3/Public/RADIal/ready_to_use/RADIal/labels_with_class.csv'
+SEQ_DIR        = '/Benson_DATA3/Public/RADIal/raw_sequences/'
+MODEL_PATH     = 'yolo26x.pt'
+
+CLASS_MAP = {
+    '1': 'car',
+    '2': 'truck',
+    '3': 'bus',
+    '4': 'person',
+    '5': 'bicycle',
+    '6': 'motorcycle',
+    '7': 'train',
+}
+CLASS_COLORS = {
+    'car':        '#00C896',
+    'truck':      '#FF7043',
+    'bus':        '#EF5350',
+    'person':     '#42A5F5',
+    'bicycle':    '#FFCA28',
+    'motorcycle': '#AB47BC',
+    'train':      '#26C6DA',
+    'nothing':    '#9E9E9E',
+}
+
 def bbox_iou(box1, boxes):
     x1, y1, x2, y2 = box1
-
-    xi1 = np.maximum(x1, boxes[:, 0])
-    yi1 = np.maximum(y1, boxes[:, 1])
-    xi2 = np.minimum(x2, boxes[:, 2])
-    yi2 = np.minimum(y2, boxes[:, 3])
-
-    inter_w = np.maximum(0, xi2 - xi1)
-    inter_h = np.maximum(0, yi2 - yi1)
-    inter_area = inter_w * inter_h
-
+    xi1 = np.maximum(x1, boxes[:, 0]); yi1 = np.maximum(y1, boxes[:, 1])
+    xi2 = np.minimum(x2, boxes[:, 2]); yi2 = np.minimum(y2, boxes[:, 3])
+    inter = np.maximum(0, xi2 - xi1) * np.maximum(0, yi2 - yi1)
     area1 = (x2 - x1) * (y2 - y1)
     area2 = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-
-    union = area1 + area2 - inter_area
-
-    return np.where(union > 0, inter_area / union, 0)
+    union = area1 + area2 - inter
+    return np.where(union > 0, inter / union, 0)
 
 
+# ─────────────────────────────────────────────
+#  PHASE 1 — Inférence YOLO (batch)
+# ─────────────────────────────────────────────
+print("=== Phase 1 : inférence YOLO ===")
+labels_df = pd.read_csv(LABELS_CSV)
+labels    = labels_df.to_numpy()
+model     = YOLO(MODEL_PATH)
+db_cache  = {}
 
-labels_df = pd.read_csv('/Benson_DATA3/Public/RADIal/ready_to_use/RADIal/labels.csv').to_numpy()
-model = YOLO('yolo26x.pt')
-vehicle_class_col = np.full(len(labels_df), -1, dtype=str)
-class_tresh_col = np.full(len(labels_df), -1, dtype=float)
+results = []   # chaque entrée = dict avec tout ce qu'il faut pour la validation
 
-db_cache = {}
-pbar = tqdm(enumerate(labels_df), total=len(labels_df), desc="Classifying", unit="sample")
-
-for idx, label in pbar:
-    if label[1] == -1 : 
+for idx, label in tqdm(enumerate(labels), total=len(labels), desc="YOLO", unit="img"):
+    if label[1] == -1:
+        results.append(None)
         continue
 
-    if label[14] not in db_cache:
-        db = SyncReader(os.path.join('/Benson_DATA3/Public/RADIal/raw_sequences/',label[14]), tolerance=20000, silent=True)
-        db_cache[label[14]] = db
-    
-    db = db_cache[label[14]]
-
+    seq = label[14]
+    if seq not in db_cache:
+        db_cache[seq] = SyncReader(
+            os.path.join(SEQ_DIR, seq), tolerance=20000, silent=True
+        )
+    db   = db_cache[seq]
     data = db.GetSensorData(label[15])
-    # Get the camera image
-    camera_data = data['camera']['data']
-    # ax.imshow(camera_data)
-    img_h, img_w = camera_data.shape[:2]
-    
-    result = model(camera_data, verbose=False)[0]
+    img  = data['camera']['data']
+
+    result  = model(img, verbose=False)[0]
     conf_np = result.boxes.conf.cpu().numpy()
-    cls_np = result.boxes.cls.cpu().numpy().astype(int)
+    cls_np  = result.boxes.cls.cpu().numpy().astype(int)
     xyxy_np = result.boxes.xyxy.cpu().numpy()
 
+    label_box = label[1:5].astype(np.float32)
+
     if len(xyxy_np) == 0:
-        vehicle_class_col[idx] = 'nothing'
-        class_tresh_col[idx] = 0.0
-        pbar.set_postfix({
-            'seq': label[14][-10:],
-            'iou': f"{0.0:.2f}",
-            'cls': 'nothing',
-            'labeled': int(np.sum(vehicle_class_col != '-1'))
-        })
-        continue
+        entry = dict(idx=idx, image=img, label_box=label_box,
+                     yolo_class='nothing', yolo_conf=0.0, yolo_iou=0.0,
+                     yolo_box=None, validated_class=None)
+    else:
+        ious  = bbox_iou(label_box, xyxy_np)
+        best  = int(np.argmax(ious))
+        entry = dict(
+            idx        = idx,
+            image      = img,
+            label_box  = label_box,
+            yolo_class = result.names[cls_np[best]],
+            yolo_conf  = float(conf_np[best]),
+            yolo_iou   = float(ious[best]),
+            yolo_box   = xyxy_np[best],
+            validated_class = None,
+        )
 
-    label_box= label[1:5].astype(np.float32)
+    results.append(entry)
 
-    ious = bbox_iou(label_box, xyxy_np)
-    best = int(np.argmax(ious))
+valid_results = [r for r in results if r is not None]
+print(f"\n{len(valid_results)} échantillons valides à valider.\n")
 
-    class_pred_id = cls_np[best]
-    class_pred_name = result.names[class_pred_id]
-    xyxy_np_best = xyxy_np[best]
 
-    if ious[best] > 0.6:
-        vehicle_class_col[idx] = class_pred_name
-    
-    class_tresh_col[idx] = ious[best]
+# ─────────────────────────────────────────────
+#  PHASE 2 — Validation interactive
+# ─────────────────────────────────────────────
+print("=== Phase 2 : validation interactive ===")
+print("  ESPACE      → pause / reprise")
+print("  ENTRÉE      → valider la classe YOLO")
+print("  ←  /  →     → reculer / avancer")
+print("  1-7         → corriger la classe et avancer")
+print("  Q           → terminer et sauvegarder\n")
 
-    pbar.set_postfix({
-        'seq': label[14][-10:],
-        'iou': f"{ious[best]:.2f}",
-        'cls': class_pred_name,
-        'labeled': int(np.sum(vehicle_class_col != '-1'))
-    })
+class Validator:
+    def __init__(self, items, delay_ms=AUTO_DELAY_MS):
+        self.items    = items
+        self.delay_ms = delay_ms
+        self.pos      = 0
+        self.playing  = True
+        self.timer    = None
+        self.done     = False
+
+        # ── Figure layout ────────────────────────────────
+        self.fig = plt.figure(figsize=(14, 9), facecolor='#111')
+        self.fig.canvas.manager.set_window_title("Validation YOLO — RADIal")
+
+        # axes image (haut)
+        self.ax_img = self.fig.add_axes([0.01, 0.22, 0.98, 0.76])
+        self.ax_img.set_facecolor('#111')
+        self.ax_img.axis('off')
+
+        # axes barre de progression (bas)
+        self.ax_bar = self.fig.add_axes([0.01, 0.155, 0.98, 0.025])
+        self.ax_bar.set_xlim(0, len(self.items))
+        self.ax_bar.set_ylim(0, 1)
+        self.ax_bar.axis('off')
+        self.progress_bg  = self.ax_bar.barh(0, len(self.items), height=1, color='#333')[0]
+        self.progress_bar = self.ax_bar.barh(0, 0, height=1, color='#00C896')[0]
+
+        # boutons de classe (rang du bas)
+        btn_colors = [CLASS_COLORS.get(c, '#888') for c in CLASS_MAP.values()]
+        btn_y, btn_h = 0.03, 0.095
+        btn_w = 0.126
+        self.btns = []
+        for i, (key, cls) in enumerate(CLASS_MAP.items()):
+            ax_b = self.fig.add_axes([0.01 + i * (btn_w + 0.007), btn_y, btn_w, btn_h])
+            b = Button(ax_b, f"[{key}] {cls}", color=btn_colors[i], hovercolor='#fff')
+            b.label.set_fontsize(9)
+            b.label.set_color('#111')
+            b.label.set_fontweight('bold')
+            b.on_clicked(lambda _, c=cls: self._pick_class(c))
+            self.btns.append(b)
+
+        # status text
+        self.txt_status = self.fig.text(
+            0.5, 0.135, '', ha='center', va='center',
+            fontsize=10, color='#aaa', fontfamily='monospace'
+        )
+
+        self.fig.canvas.mpl_connect('key_press_event', self._on_key)
+        self._draw()
+        self._arm_timer()
+        plt.show(block=True)
+
+    # ── dessin ───────────────────────────────────────────
+    def _draw(self):
+        r   = self.items[self.pos]
+        img = r['image']
+        cls = r['validated_class'] or r['yolo_class']
+        col = CLASS_COLORS.get(r['yolo_class'], '#888')
+
+        self.ax_img.clear()
+        self.ax_img.imshow(img)
+        self.ax_img.axis('off')
+
+        # bbox label RADIal (blanc pointillé)
+        x1, y1, x2, y2 = r['label_box']
+        rect_gt = mpatches.FancyBboxPatch(
+            (x1, y1), x2 - x1, y2 - y1,
+            boxstyle="square,pad=0",
+            linewidth=1.5, linestyle='--',
+            edgecolor='white', facecolor='none'
+        )
+        self.ax_img.add_patch(rect_gt)
+
+        # bbox YOLO (couleur classe)
+        if r['yolo_box'] is not None:
+            bx1, by1, bx2, by2 = r['yolo_box']
+            rect_yolo = mpatches.FancyBboxPatch(
+                (bx1, by1), bx2 - bx1, by2 - by1,
+                boxstyle="square,pad=0",
+                linewidth=2.5,
+                edgecolor=col, facecolor=col + '22'
+            )
+            self.ax_img.add_patch(rect_yolo)
+            self.ax_img.text(
+                bx1, by1 - 6,
+                f"{r['yolo_class']}  conf={r['yolo_conf']:.2f}  IoU={r['yolo_iou']:.2f}",
+                color=col, fontsize=10, fontweight='bold',
+                bbox=dict(facecolor='#111', alpha=0.6, pad=2, edgecolor='none')
+            )
+
+        # titre
+        validated_marker = '✓' if r['validated_class'] else '?'
+        title_cls = r['validated_class'] if r['validated_class'] else f"({r['yolo_class']})"
+        self.ax_img.set_title(
+            f"[{self.pos + 1}/{len(self.items)}]  {validated_marker}  {title_cls}",
+            color='white', fontsize=13, pad=6, loc='left'
+        )
+
+        # barre de progression
+        validated_count = sum(1 for it in self.items if it['validated_class'] is not None)
+        self.progress_bar.set_width(self.pos + 1)
+
+        # status bar
+        play_icon = '▶' if self.playing else '⏸'
+        self.txt_status.set_text(
+            f"{play_icon}  {validated_count}/{len(self.items)} validés  |  "
+            f"ESPACE=pause  ←/→=navigation  1-7=classe  ENTRÉE=OK  Q=quitter"
+        )
+
+        self.fig.canvas.draw_idle()
+
+    # ── navigation ───────────────────────────────────────
+    def _advance(self, auto=False):
+        self._cancel_timer()
+        if self.pos < len(self.items) - 1:
+            self.pos += 1
+            self._draw()
+            if self.playing:
+                self._arm_timer()
+        else:
+            self._finish()
+
+    def _back(self):
+        self._cancel_timer()
+        self.pos = max(0, self.pos - 1)
+        self._draw()
+        if self.playing:
+            self._arm_timer()
+
+    def _pick_class(self, cls):
+        self._cancel_timer()
+        self.items[self.pos]['validated_class'] = cls
+        self._advance()
+
+    def _validate_yolo(self):
+        self.items[self.pos]['validated_class'] = self.items[self.pos]['yolo_class']
+        self._advance()
+
+    # ── timer auto-avance ─────────────────────────────────
+    def _arm_timer(self):
+        self._cancel_timer()
+        if self.playing:
+            self.timer = self.fig.canvas.new_timer(interval=self.delay_ms)
+            self.timer.single_shot = True
+            self.timer.add_callback(lambda: self._advance(auto=True))
+            self.timer.start()
+
+    def _cancel_timer(self):
+        if self.timer:
+            self.timer.stop()
+            self.timer = None
+
+    # ── clavier ──────────────────────────────────────────
+    def _on_key(self, event):
+        k = event.key
+        if k == ' ':
+            self.playing = not self.playing
+            if self.playing:
+                self._arm_timer()
+            else:
+                self._cancel_timer()
+            self._draw()
+        elif k == 'left':
+            self._back()
+        elif k == 'right':
+            self._advance()
+        elif k == 'enter':
+            self._validate_yolo()
+        elif k in CLASS_MAP:
+            self._pick_class(CLASS_MAP[k])
+        elif k in ('q', 'Q', 'escape'):
+            self._finish()
+
+    # ── fin ──────────────────────────────────────────────
+    def _finish(self):
+        self._cancel_timer()
+        self.done = True
+        plt.close(self.fig)
+
+
+validator = Validator(valid_results, delay_ms=AUTO_DELAY_MS)
+
+
+# ─────────────────────────────────────────────
+#  Sauvegarde
+# ─────────────────────────────────────────────
+vehicle_class_col = np.full(len(labels), "-", dtype=object)
+iou_col           = np.full(len(labels), -1.0)
+conf_col          = np.full(len(labels), -1.0)
+
+for r in valid_results:
+    i = r['idx']
+    vehicle_class_col[i] = r['validated_class'] or r['yolo_class']
+    iou_col[i]           = r['yolo_iou']
+    conf_col[i]          = r['yolo_conf']
 
 labels_df['vehicle_class'] = vehicle_class_col
-labels_df['iou_class'] = class_tresh_col
-labels_df.to_csv('/Benson_DATA3/Public/RADIal/ready_to_use/RADIal/labels_with_class.csv', index=False)
+labels_df['iou_class']     = iou_col
+labels_df['conf_class']    = conf_col
+labels_df.to_csv(OUTPUT_CSV, index=False)
+
+validated = sum(1 for r in valid_results if r['validated_class'] is not None)
+print(f"\nSauvegardé → {OUTPUT_CSV}")
+print(f"  {validated}/{len(valid_results)} échantillons validés manuellement.")
+print(f"  {len(valid_results) - validated} laissés à la prédiction YOLO brute.")

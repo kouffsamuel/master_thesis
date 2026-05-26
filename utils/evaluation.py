@@ -26,12 +26,13 @@ def run_evaluation(net,loader,encoder,check_perf=False, detection_loss=None,loss
             outputs = net(inputs)
 
         if(detection_loss!=None):
-            classif_loss,reg_loss = detection_loss(outputs['Detection'], label_map,losses_params)
+            classif_loss,reg_loss, category_loss = detection_loss(outputs['Detection'], label_map,losses_params)
 
             classif_loss *= losses_params['weight'][0]
             reg_loss *= losses_params['weight'][1]
+            category_loss *= losses_params['weight'][2]
 
-            loss = classif_loss + reg_loss
+            loss = classif_loss + reg_loss + category_loss
 
             # statistics
             running_loss += loss.item() * inputs.size(0)
@@ -53,7 +54,7 @@ def run_evaluation(net,loader,encoder,check_perf=False, detection_loss=None,loss
     return {'loss':running_loss / len(loader.dataset) , 'mAP':mAP, 'mAR':mAR}
 
 
-def run_FullEvaluation(net,loader,encoder,iou_threshold=0.5,config=None):
+def run_FullEvaluation(net,loader,encoder,iou_threshold=0.5,config=None, device='cuda'):
 
     net.eval()
     results = []
@@ -62,7 +63,11 @@ def run_FullEvaluation(net,loader,encoder,iou_threshold=0.5,config=None):
     print('Generating Predictions...')
     predictions = {'prediction':{'objects':[],'freespace':[]},'label':{'objects':[],'freespace':[]}}
     for i, data in enumerate(loader):
-        inputs = data[0].to('cuda').float()
+        
+        if config['data_mode'] == 'ADC':
+            inputs = data[0].to(device).type(torch.complex64)
+        else:
+            inputs = data[0].to(device).float()
 
         with torch.set_grad_enabled(False):
             outputs = net(inputs)
@@ -77,6 +82,8 @@ def run_FullEvaluation(net,loader,encoder,iou_threshold=0.5,config=None):
             predictions['label']['objects'].append(true_obj)
 
         kbar.update(i)
+    # np.save("/home/skouff/master_thesis/predictions_radvit_rd.npy", predictions)
+    # predictions = np.load("/home/skouff/master_thesis/predictions_radvit_rd.npy", allow_pickle=True).item()
 
     iou_list = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
     for iou_ in iou_list:

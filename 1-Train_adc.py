@@ -7,8 +7,6 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
-from model.RadViT_ADC import RadViT_ADC
-from model.MVIT_ADC import MViT_ADC
 from model.RadViT import RadViT
 from dataset.dataset import RADIal
 from dataset.encoder import ra_encoder
@@ -48,6 +46,7 @@ def main(config=None, resume=None, exp_name=None):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     parameters = config['model']['vit']
     net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], config['data_mode']), device_ids=[0,1,2,3]) 
+    
     net.to(device)
     checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_ADC.pth", weights_only=False, map_location='cpu')
     model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection') or k.startswith('DFT')}

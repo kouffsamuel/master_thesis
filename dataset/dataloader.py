@@ -3,6 +3,7 @@ from torch.utils.data import Dataset, DataLoader, DistributedSampler, random_spl
 import numpy as np
 import torch
 
+
 Sequences = {'Validation':
              ['RECORD@2020-11-22_12.49.56',
               'RECORD@2020-11-22_12.11.49',
@@ -15,20 +16,20 @@ Sequences = {'Validation':
                 'RECORD@2020-11-22_12.54.38']}
 
 def RADIal_collate(batch):
-    images = []
-    FFTs = []
-    segmaps = []
-    labels = []
-    encoded_label = []
+    radar_FFTs = [b[0] for b in batch]
+    segmaps = [b[1] for b in batch]
+    out_labels = [b[2] for b in batch]
+    box_labels = [b[3] for b in batch]
+    images = [b[4] for b in batch]
 
-    for radar_FFT, segmap,out_label,box_labels,image in batch:
-        FFTs.append(torch.tensor(radar_FFT).permute(2,0,1))
-        segmaps.append(torch.tensor(segmap))
-        encoded_label.append(torch.tensor(out_label))
-        images.append(torch.tensor(image))
-        labels.append(torch.from_numpy(box_labels))
-
-    return torch.stack(FFTs), torch.stack(encoded_label),torch.stack(segmaps),labels,torch.stack(images)
+    FFTs = torch.from_numpy(np.stack(radar_FFTs)).permute(0,3,1,2)
+    segmaps = torch.from_numpy(np.stack(segmaps))
+    encoded_label = torch.from_numpy(np.stack(out_labels))
+    images = torch.from_numpy(np.stack(images))
+    labels = [torch.from_numpy(b[:,:-2].astype(np.float32)) for b in box_labels]
+    meta   = [b[:, -2:] for b in box_labels]
+    
+    return FFTs, encoded_label, segmaps, labels, images, meta
 
 def CreateDataLoaders(dataset,config=None,seed=0):
 

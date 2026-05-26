@@ -25,8 +25,7 @@ class FocalLoss(nn.Module):
         else:
             return loss.sum()
     
-def pixor_loss(batch_predictions, batch_labels,param):
-
+def pixor_loss(batch_predictions, batch_labels,param, device='cuda'):
 
     #########################
     #  classification loss  #
@@ -57,8 +56,8 @@ def pixor_loss(batch_predictions, batch_labels,param):
     pos_regression_prediction = regression_prediction[positive_mask.squeeze(), :]
 
 
-    T = batch_labels[:,1:]
-    P = batch_predictions[:,1:]
+    T = batch_labels[:,1:3]
+    P = batch_predictions[:,1:3]
     M = batch_labels[:,0].unsqueeze(1)
 
     if(param['regression']=='SmoothL1Loss'):
@@ -71,7 +70,23 @@ def pixor_loss(batch_predictions, batch_labels,param):
     if(NbPts>0):
         regression_loss/=NbPts
 
-    return classification_loss,regression_loss
+    ########################
+    #  Vehicle class loss  #
+    ########################
+    cat_logits = batch_predictions[:, 3:, :, :]
+    cat_labels = batch_labels[:, 3, :, :]
+
+    pos_mask = (M.squeeze(1) > 0) & (cat_labels >= 0)
+    
+    if pos_mask.any():
+        logits = cat_logits.permute(0, 2, 3, 1)[pos_mask]
+        targets = cat_labels[pos_mask].long()
+        class_weights = torch.tensor([1.0, 4.87, 0.0, 0.0, 0.0], device=device)
+        category_loss = F.cross_entropy(logits, targets, weight=class_weights, reduction='sum') / pos_mask.sum()
+    else:
+        category_loss = torch.tensor(0.0, device=batch_predictions.device)
+
+    return classification_loss,regression_loss,category_loss
 
 
 def detection_loss(output, box_labels, image_size):

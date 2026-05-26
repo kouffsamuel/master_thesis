@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from utils.evaluation import run_FullEvaluation
 import torch.nn as nn
 from model.RadViT import RadViT
-#from model.RadViT_newconfig import RadViT
 def main(config, checkpoint,difficult):
 
     # Setup random seed
@@ -28,7 +27,7 @@ def main(config, checkpoint,difficult):
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     parameters = config['model']['vit']
-    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders']), device_ids=[0,1,2,3]) 
+    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], data_mode=config['data_mode']), device_ids=[0])
     net.to(device)
     dataset = RADIal(root_dir = config['dataset']['root_dir'],
                         statistics= config['dataset']['statistics'],
@@ -44,7 +43,7 @@ def main(config, checkpoint,difficult):
     net.load_state_dict(dict['net_state_dict'])
 
     print('===========  Running the evaluation ==================:')
-    run_FullEvaluation(net,test_loader,enc,config=config)
+    run_FullEvaluation(net,test_loader,enc,config=config, device=device)
 
 
 

@@ -14,12 +14,13 @@ def conv3x3(in_planes, out_planes, stride=1, bias=False):
                      padding=1, bias=bias)
 class Detection_Header(nn.Module):
 
-    def __init__(self, use_bn=True,reg_layer=2,input_angle_size=0):
+    def __init__(self, use_bn=True,reg_layer=2,input_angle_size=0, num_classes=5): # num_classes=4
         super(Detection_Header, self).__init__()
 
         self.use_bn = use_bn
         self.reg_layer = reg_layer
         self.input_angle_size = input_angle_size
+        self.num_classes = num_classes
         self.target_angle = 224
         bias = not use_bn
 
@@ -49,7 +50,8 @@ class Detection_Header(nn.Module):
 
         self.clshead = conv3x3(96, 1, bias=True)
         self.reghead = conv3x3(96, reg_layer, bias=True)
-            
+        self.cathead = conv3x3(96, num_classes, bias=True)
+
     def forward(self, x):
 
         x = self.conv1(x)
@@ -67,8 +69,9 @@ class Detection_Header(nn.Module):
     
         cls = torch.sigmoid(self.clshead(x))
         reg = self.reghead(x)
+        cat = self.cathead(x)
 
-        return torch.cat([cls, reg], dim=1)
+        return torch.cat([cls, reg, cat], dim=1)
     
 class BasicBlock(nn.Module):
 
@@ -146,7 +149,7 @@ class RangeAngle_Decoder(nn.Module):
 
 
 class RadViT(nn.Module):
-    def __init__(self, D, p, H, W, neuron, mha, layer, dropout, n_encoders=1, data_mode='Custom_RD'):
+    def __init__(self, D, p, H, W, neuron, mha, layer, dropout, n_encoders=1, kmd2=False, data_mode='Custom_RD'):
         super().__init__()
         # ViT network parameters
         self.D = D  # dimension embedding
@@ -161,6 +164,7 @@ class RadViT(nn.Module):
         self.Hp = self.H // self.p
         self.Wp = self.W // self.p
         self.data_mode = data_mode
+        self.kmd2 = kmd2
 
         # Nombre total de patchs par image
         self.Np = self.Hp * self.Wp
@@ -168,8 +172,10 @@ class RadViT(nn.Module):
         # Embedding linéaire de chaque patch
         self.patch_embed = nn.Linear(2 *self.p ** 2, self.D)
         # self.patch_embed = PatchEmbed(patch_size=(self.p, self.p), in_chans=32, embed_dim=self.D)
+        
         # # Positional encodings séparés
         self.pe = PositionalEncoding(self.D)
+
         # self.pe = nn.Parameter(torch.zeros(1, self.Np, self.D), requires_grad=False) 
         # pos_embed = get_2d_sincos_pos_embed(self.pe.shape[-1], (self.Hp, self.Wp), cls_token=False)
         # self.pe.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
@@ -196,7 +202,7 @@ class RadViT(nn.Module):
         self.detection_head = Detection_Header(use_bn=True, reg_layer=2, input_angle_size=224)
 
     def forward(self, x, x_mask=None):
-        B =  x.shape[0]  # batch
+        B = x.shape[0]  # batch
         T = x.shape[1]  # number of antennas (or channels)
         
         if self.data_mode == 'ADC':
@@ -217,12 +223,13 @@ class RadViT(nn.Module):
             for layer in self.encoder_layers:
                 xi = layer(xi, x_mask)
             antenna_outputs.append(xi)
+
         x = torch.stack(antenna_outputs, dim=1).mean(dim=1)
        
         # x = self.patch_embed(x)  # (B, D, Hp, Wp)
         # x = x.flatten(2).transpose(1, 2)  # (B, Np, D)
-        # # x = x + self.pe[:, :x.shape[1], :]
         # x = self.pe(x)  # (B, Np, D)
+        # # x = x + self.pe[:, :x.shape[1], :]
 
         # for layer in self.encoder_layers:
         #     x = layer(x, x_mask)
@@ -233,13 +240,22 @@ class RadViT(nn.Module):
         # ---- Multi-scale features ----
     
         # y: (B, D, 32, 16)
-        feat2 = self.feat_2(y)                                                        # (B, 192,  32, 16)
-        base_half = F.avg_pool2d(y, kernel_size=(2, 1))
-        feat3 = self.feat_3(base_half)                                                # (B,  16,  16, 16)
-        base_up2 = F.interpolate(y, size=(64,  16), mode='bilinear', align_corners=False)
-        feat1 = self.feat_1(base_up2)                                                 # (B, 160,  64, 16)
-        base_up4 = F.interpolate(y, size=(128, 16), mode='bilinear', align_corners=False)
-        feat0 = self.feat_0(base_up4)                                                 # (B,   D, 128, 16)
+        if not self.kmd2:
+            feat2 = self.feat_2(y)                                                        # (B, 192,  32, 16)
+            base_half = F.avg_pool2d(y, kernel_size=(2, 1))
+            feat3 = self.feat_3(base_half)                                                # (B,  16,  16, 16)
+            base_up2 = F.interpolate(y, size=(64,  16), mode='bilinear', align_corners=False)
+            feat1 = self.feat_1(base_up2)                                                 # (B, 160,  64, 16)
+            base_up4 = F.interpolate(y, size=(128, 16), mode='bilinear', align_corners=False)
+            feat0 = self.feat_0(base_up4)                                                   # (B,   D, 128, 16)
+        else:
+            feat3 = self.feat_3(y)                                                          # (B,  16,  16, 16) ← y directement, plus besoin d'avg_pool
+            base_up2 = F.interpolate(y, size=(32, 16),  mode='bilinear', align_corners=False)
+            feat2 = self.feat_2(base_up2)                                                   # (B, 192,  32, 16)
+            base_up4 = F.interpolate(y, size=(64, 16),  mode='bilinear', align_corners=False)
+            feat1 = self.feat_1(base_up4)                                                   # (B, 160,  64, 16)
+            base_up8 = F.interpolate(y, size=(128, 16), mode='bilinear', align_corners=False)
+            feat0 = self.feat_0(base_up8)
 
         out = self.ra_decoder([feat0, feat1, feat2, feat3])  # (B, 256, 128, 224)
         out = self.detection_head(out)                      # (B,   3, 128, 224)

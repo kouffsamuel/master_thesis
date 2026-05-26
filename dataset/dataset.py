@@ -11,6 +11,9 @@ import torch.nn.functional as F
 import mkl_fft
 import math
 
+CLASS_TO_ID = {'car':0,'truck':1,'bicycle':2,'bus':3, 'person':4}
+
+
 class RADIal(Dataset):
 
     def __init__(self, root_dir,statistics=None,encoder=None,difficult=False,perform_FFT='Default'):
@@ -19,7 +22,7 @@ class RADIal(Dataset):
         self.statistics = statistics
         self.encoder = encoder
         self.perform_FFT = perform_FFT
-        self.labels = pd.read_csv(os.path.join(root_dir,'labels.csv')).to_numpy()
+        self.labels = pd.read_csv(os.path.join(root_dir,'labels_with_class.csv')).to_numpy()
         self.numChirps = 256
         self.numSamplePerChirp = 512
         self.numRxAnt = 16
@@ -33,7 +36,14 @@ class RADIal(Dataset):
         # Keeps only easy samples
         if(difficult==False):
             ids_filters=[]
-            ids = np.where( self.labels[:, -1] == 0)[0]
+            ids = np.where( self.labels[:, 16] == 0)[0]
+            ids_filters.append(ids)
+            ids_filters = np.unique(np.concatenate(ids_filters))
+            self.labels = self.labels[ids_filters]
+
+        if(difficult==True):
+            ids_filters=[]
+            ids = np.where( self.labels[:, 16] == 1)[0]
             ids_filters.append(ids)
             ids_filters = np.unique(np.concatenate(ids_filters))
             self.labels = self.labels[ids_filters]
@@ -67,10 +77,17 @@ class RADIal(Dataset):
         box_labels = self.labels[entries_indexes]
 
         # Labels contains following parameters:
-        # x1_pix	y1_pix	x2_pix	y2_pix	laser_X_m	laser_Y_m	laser_Z_m radar_X_m	radar_Y_m	radar_R_m
+        # x1_pix	y1_pix	x2_pix	y2_pix	laser_X_m	laser_Y_m	laser_Z_m radar_X_m	radar_Y_m	radar_R_m radar_A_deg  radar_D_mps class
 
-        # format as following [Range, Angle, Doppler,laser_X_m,laser_Y_m,laser_Z_m,x1_pix,y1_pix,x2_pix	,y2_pix]
-        box_labels = box_labels[:,[10,11,12,5,6,7,1,2,3,4]].astype(np.float32)
+        # format as following [Range, Angle, Doppler,laser_X_m,laser_Y_m,laser_Z_m,x1_pix,y1_pix,x2_pix	,y2_pix, class]
+        box_labels = box_labels[:,[10,11,12,5,6,7,1,2,3,4,17,14,15]]
+        coords = box_labels[:,:-3].astype(np.float32)
+        class_names = box_labels[:,-3]
+        sequence_names = box_labels[:,11]
+        frame_idx = box_labels[:,12]
+
+        class_ids = np.array([CLASS_TO_ID.get(c, -1) for c in class_names], dtype=np.float32)
+        box_labels = np.concatenate([coords, class_ids.reshape(-1, 1), sequence_names.reshape(-1, 1), frame_idx.reshape(-1, 1)], axis=1)
 
 
         ######################
@@ -92,9 +109,9 @@ class RADIal(Dataset):
                 radar_name = os.path.join(self.root_dir,'RD_Shift',"fft_{:06d}.npy".format(sample_id))
                 radar_FFT = np.load(radar_name,allow_pickle=True)
                 if(self.statistics is not None):
-                    for i in range(len(self.statistics['input_mean'])):
-                        radar_FFT[...,i] -= self.statistics['input_mean'][i]
-                        radar_FFT[...,i] /= self.statistics['input_std'][i]
+                        for i in range(len(self.statistics['input_mean'])):
+                            radar_FFT[...,i] -= self.statistics['input_mean'][i]
+                            radar_FFT[...,i] /= self.statistics['input_std'][i]
 
             else:
                 radar_name = os.path.join(self.root_dir,'ADC_Data',"adc_{:06d}.npy".format(sample_id))

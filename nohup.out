@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/linux/skouff/master_thesis/10-Benchmark_Yolo_RaViT.py", line 10, in <module>
+    import torch
+  File "/home/skouff/.conda/envs/radial/lib/python3.10/site-packages/torch/__init__.py", line 2247, in <module>
+    from torch import (
+  File "/home/skouff/.conda/envs/radial/lib/python3.10/site-packages/torch/distributions/__init__.py", line 96, in <module>
+    from .kl import _add_kl_info, kl_divergence, register_kl
+  File "/home/skouff/.conda/envs/radial/lib/python3.10/site-packages/torch/distributions/kl.py", line 35, in <module>
+    from .poisson import Poisson
+  File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 879, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 975, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1073, in get_data
+KeyboardInterrupt

@@ -3,6 +3,7 @@ import os
 import json
 import argparse
 import re
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3" 
 import torch
 import random
 import numpy as np
@@ -45,18 +46,19 @@ def main(config=None, resume=None, exp_name=None):
 
 
     # Create the model
-    device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     parameters = config['model']['vit']
-    net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], data_mode=config['data_mode'])
+    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], data_mode=config['data_mode']), device_ids=[0,1,2])
     net.to(device)
-    checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_RD_Shift.pth", weights_only=False, map_location='cpu')
-    model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection')}
-    net.load_state_dict(model_state_dict, strict=False)
 
-    # Freeze RA Decoder and Detection Head at initialization
-    for name, param in net.named_parameters():
-        if name.startswith('module.detection'):
-            print(f"Loading {name}")
+    if config['data_mode'] == 'ADC':
+        checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_ADC.pth", weights_only=False, map_location='cpu')
+        model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection') or k.startswith('DFT')}
+    else:
+        checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_RD_Shift.pth", weights_only=False, map_location='cpu')
+        model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection')}
+    
+    net.load_state_dict(model_state_dict, strict=False)
 
     dataset = RADIal(root_dir = config['dataset']['root_dir'],
                         statistics= config['dataset']['statistics'],
@@ -143,17 +145,18 @@ def main(config=None, resume=None, exp_name=None):
                 outputs = net(inputs)
 
 
-            classif_loss,reg_loss = pixor_loss(outputs['Detection'], label_map,config['losses'])
+            classif_loss,reg_loss,category_loss = pixor_loss(outputs['Detection'], label_map,config['losses'], device=device)
 
             classif_loss *= config['losses']['weight'][0]
             reg_loss *= config['losses']['weight'][1]
+            category_loss *= config['losses']['weight'][2]
 
-
-            loss = classif_loss + reg_loss 
+            loss = classif_loss + reg_loss + category_loss
 
             writer.add_scalar('Loss/train', loss.item(), global_step)
             writer.add_scalar('Loss/train_clc', classif_loss.item(), global_step)
             writer.add_scalar('Loss/train_reg', reg_loss.item(), global_step)
+            writer.add_scalar('Loss/train_cat', category_loss.item(), global_step)
 
             # backprop
             loss.backward()
@@ -162,7 +165,7 @@ def main(config=None, resume=None, exp_name=None):
             # statistics
             running_loss += loss.item() * inputs.size(0)
 
-            kbar.update(i, values=[("loss", loss.item()), ("class", classif_loss.item()), ("reg", reg_loss.item())])
+            kbar.update(i, values=[("loss", loss.item()), ("class", classif_loss.item()), ("reg", reg_loss.item()), ("cat", category_loss.item())])
 
 
             global_step += 1
@@ -201,7 +204,6 @@ def main(config=None, resume=None, exp_name=None):
                 best_f1 = f1_score
                 name_output_file = config['name']+'_AP_{:.4f}_AR_{:.4f}_F1_{:.4f}_best.pth'.format(eval['mAP'], eval['mAR'], f1_score)
                 filename = os.path.join(output_folder , exp_name , name_output_file)
-                torch.save(checkpoint,filename)
         
         scheduler.step()
         history['lr'].append(scheduler.get_last_lr()[0])

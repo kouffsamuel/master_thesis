@@ -1,3 +1,4 @@
+import sys
 from typing import Final
 import torch
 import os
@@ -7,6 +8,7 @@ import pkbar
 import argparse
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 def RA_to_cartesian_box(data):
     L = 4 # length of the bounding box
@@ -22,12 +24,13 @@ def RA_to_cartesian_box(data):
 
     return boxes
 
-def perform_nms(valid_class_predictions, valid_box_predictions, nms_threshold):
+def perform_nms(valid_class_predictions, valid_box_predictions, valid_class_id_predictions, nms_threshold):
 
     # sort the detections such that the entry with the maximum confidence score is at the top
     sorted_indices = np.argsort(valid_class_predictions)[::-1]
     sorted_box_predictions = valid_box_predictions[sorted_indices]
     sorted_class_predictions = valid_class_predictions[sorted_indices]
+    sorted_class_id_predictions = valid_class_id_predictions[sorted_indices]
 
     for i in range(sorted_box_predictions.shape[0]):
         # get the IOUs of all boxes with the currently most certain bounding box
@@ -43,8 +46,9 @@ def perform_nms(valid_class_predictions, valid_box_predictions, nms_threshold):
         overlap_mask = np.where(ious < nms_threshold, True, False)
         sorted_box_predictions = sorted_box_predictions[overlap_mask]
         sorted_class_predictions = sorted_class_predictions[overlap_mask]
+        sorted_class_id_predictions = sorted_class_id_predictions[overlap_mask]
 
-    return sorted_class_predictions, sorted_box_predictions
+    return sorted_class_predictions, sorted_box_predictions, sorted_class_id_predictions
 def bbox_iou(box1, boxes):
 
     # currently inspected box
@@ -79,26 +83,31 @@ def process_predictions_FFT(batch_predictions, confidence_threshold=0.1, nms_thr
 
     point_cloud_reg_predictions = RA_to_cartesian_box(batch_predictions)
     point_cloud_reg_predictions = np.asarray(point_cloud_reg_predictions)
-    point_cloud_class_predictions = batch_predictions[:,-1]
+    point_cloud_class_predictions = batch_predictions[:,-2]
+    class_id_predictions = batch_predictions[:,-1]
 
     # get valid detections
     validity_mask = np.where(point_cloud_class_predictions > confidence_threshold, True, False)
 
     valid_box_predictions = point_cloud_reg_predictions[validity_mask]
     valid_class_predictions = point_cloud_class_predictions[validity_mask]
+    valid_class_id_predictions = class_id_predictions[validity_mask]
 
 
     # perform Non-Maximum Suppression
-    final_class_predictions, final_box_predictions = perform_nms(valid_class_predictions, valid_box_predictions,
+    final_class_predictions, final_box_predictions, final_class_id_predictions = perform_nms(valid_class_predictions, valid_box_predictions, valid_class_id_predictions,
                                                                  nms_threshold)
 
 
     # concatenate point_cloud_id, confidence score and bounding box prediction | shape: [N_FINAL, 1+1+8]
+    # add class_id to the final predictions
     final_Object_predictions = np.hstack((final_class_predictions[:, np.newaxis],
-                                               final_box_predictions))
+                                               final_box_predictions,
+                                               final_class_id_predictions[:, np.newaxis]))
 
 
     return final_Object_predictions
+
 
 def GetFullMetrics(predictions,object_labels,range_min=5,range_max=100,IOU_threshold=0.5):
     perfs = {}
@@ -107,8 +116,6 @@ def GetFullMetrics(predictions,object_labels,range_min=5,range_max=100,IOU_thres
     iou_threshold = []
     RangeError = []
     AngleError = []
-
-    out = []
 
     for threshold in np.arange(0.1,0.96,0.1):
 
@@ -158,7 +165,7 @@ def GetFullMetrics(predictions,object_labels,range_min=5,range_max=100,IOU_thres
 
                 used_gt = np.zeros(len(ground_truth_box_corners))
                 for pid, prediction in enumerate(Object_predictions):
-                    iou = bbox_iou(prediction[1:], ground_truth_box_corners)
+                    iou = bbox_iou(prediction[1:9], ground_truth_box_corners)
                     ids = np.where(iou>=IOU_threshold)[0]
 
 
@@ -167,8 +174,8 @@ def GetFullMetrics(predictions,object_labels,range_min=5,range_max=100,IOU_thres
                         used_gt[ids]=1
 
                         # cummulate errors
-                        range_error += np.sum(np.abs(ground_truth_box_corners[ids,-2] - prediction[-2]))
-                        angle_error += np.sum(np.abs(ground_truth_box_corners[ids,-1] - prediction[-1]))
+                        range_error += np.sum(np.abs(ground_truth_box_corners[ids,-2] - prediction[-3]))
+                        angle_error += np.sum(np.abs(ground_truth_box_corners[ids,-1] - prediction[-2]))
                         nbObjects+=len(ids)
                     else:
                         FP+=1
@@ -245,7 +252,7 @@ def GetDetMetrics(predictions,object_labels,threshold=0.2,range_min=5,range_max=
         used_gt = np.zeros(len(ground_truth_box_corners))
 
         for pid, prediction in enumerate(Object_predictions):
-            iou = bbox_iou(prediction[1:], ground_truth_box_corners)
+            iou = bbox_iou(prediction[1:9], ground_truth_box_corners)
             ids = np.where(iou>=IOU_threshold)[0]
 
             if(len(ids)>0):

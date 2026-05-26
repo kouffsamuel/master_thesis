@@ -26,7 +26,7 @@ def main(config, checkpoint_filename,difficult):
     dataset = RADIal(root_dir = config['dataset']['root_dir'],
                         statistics= config['dataset']['statistics'],
                         encoder=enc.encode,
-                        difficult=True,perform_FFT=config['data_mode'])
+                        difficult=difficult,perform_FFT=config['data_mode'])
     # Load the model
     dict = torch.load(checkpoint_filename, weights_only=False)
     net.load_state_dict(dict['net_state_dict'])
@@ -43,7 +43,6 @@ def main(config, checkpoint_filename,difficult):
             outputs = net(inputs)
             if config['data_mode'] == 'ADC':
                 intermediate = net.DFT(inputs).detach().cpu().numpy()[0]
-
             else:
                 intermediate = None
 
