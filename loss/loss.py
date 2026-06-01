@@ -1,6 +1,9 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+"""
+loss.py file from FFTRadNet
+"""
 class FocalLoss(nn.Module):
     """
     Focal loss class. Stabilize training by reducing the weight of easily classified background sample and focussing

@@ -208,5 +208,10 @@ __marimo__/
 
 /experiments/
 model/*.pth
-*.log
+
 /dataset/yolo26x.pt
+/dataset/yolo26n.pt
+/dataset/*.log
+*.log
+/kmd2_processing/*.png
+/kmd2_processing/*.npy

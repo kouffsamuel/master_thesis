@@ -1,5 +1,5 @@
 """
-Manual Tracking Annotator
+Manual Tracking Annotator - Claude.ai generated
 =========================
 Permet d'annoter manuellement les track IDs sur les frames du test set RADIal.
 

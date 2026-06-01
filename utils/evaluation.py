@@ -4,6 +4,10 @@ from .metrics import GetFullMetrics, Metrics
 import pkbar
 import pickle
 
+"""
+Evaluation.py file from FFTRadNet.
+"""
+
 def run_evaluation(net,loader,encoder,check_perf=False, detection_loss=None,losses_params=None,config=None, device='cuda'):
 
     metrics = Metrics()

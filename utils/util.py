@@ -6,6 +6,9 @@ from shapely.ops import unary_union
 import polarTransform
 from utils.metrics import process_predictions_FFT
 
+# Utils.py script from FFTRadnet and adapted for RadViT. 
+# Contains functions for coordinate transformations, visualization, and processing model predictions.
+
 # Camera parameters
 camera_matrix = np.array([[1.84541929e+03, 0.00000000e+00, 8.55802458e+02],
                  [0.00000000e+00 , 1.78869210e+03 , 6.07342667e+02],[0.,0.,1]])
@@ -34,6 +37,7 @@ def imageToWorld(u, v, z_world=0.0):
     """
     Convert image pixel (u, v) into world coordinates (X, Y, Z)
     assuming the point lies on a plane Z = z_world (default = ground plane).
+    Written with help of Claude.ai
     """
 
     # Step 1: Undistort the pixel

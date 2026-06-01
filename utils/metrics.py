@@ -10,6 +10,10 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
+"""
+Metrics.py file from FFTRadNet
+"""
+
 def RA_to_cartesian_box(data):
     L = 4 # length of the bounding box
     W = 1.8 # width of the bounding box 

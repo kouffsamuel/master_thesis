@@ -1,8 +1,6 @@
-import os
 import json
 import argparse
 import torch
-import numpy as np
 from model.RadViT import RadViT
 from dataset.dataset import RADIal
 from dataset.encoder import ra_encoder
@@ -11,14 +9,21 @@ from utils.util import DisplayHMI
 import torch.nn as nn
 
 def main(config, checkpoint_filename,difficult):
-
-    # set device
+    """
+    Main function for testing the RadViT model on the RADIal dataset.
+    Taken From FFTRadNet's test script.
+    It loads the model checkpoint, runs inference on the all dataset, and displays the results on an HMI.
+    Args:
+        config: Configuration dictionary loaded from a JSON file.
+        checkpoint_filename: Path to the model checkpoint (.pth file) to load.
+        difficult: Boolean flag to indicate whether to use the difficult subset of the dataset.
+    """
 
     # Load the dataset
     enc = ra_encoder(geometry = config['dataset']['geometry'],
                         statistics = config['dataset']['statistics'],
                         regression_layer = 2)
-
+    # Set device and create the model
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     parameters = config['model']['vit']
     net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders']), device_ids=[0,1,2,3]) 
@@ -36,7 +41,6 @@ def main(config, checkpoint_filename,difficult):
     for data in dataset:
         # Display GD and predictions on HMI
         # Display bounding boxes on radar and camera image 
-
         # data is composed of [radar_FFT, segmap,out_label,box_labels,image]
         inputs = torch.tensor(data[0]).permute(2,0,1).to(device).unsqueeze(0)
         with torch.set_grad_enabled(False):

@@ -5,6 +5,11 @@ import motmetrics as mm
 import random
 
 class Tracker:
+    """
+    Tracker represents a single tracked object using a Kalman filter to estimate its state (position and velocity).
+    It maintains the track's ID, the Kalman filter instance, the bounding box corners, the number of hits, and the number of consecutive misses.
+    The Tracker can predict the next state, update its state with new detections, and confirm its ID after a certain number of hits.
+    """
     _id_counter = 0
     
     def __init__(self, centroid, box_corners):
@@ -57,6 +62,11 @@ class Tracker:
         return self.kf.x[:2].flatten()
     
 class MultiObjectTracker:
+    """
+    MultiObjectTracker manages multiple Tracker instances to maintain object identities across frames.
+    It uses the Hungarian algorithm for data association based on Mahalanobis distance and prunes tracks 
+    that have not been matched for a certain number of frames.
+    """
     def __init__(self, max_misses, min_hits, mahal_threshold):
         self.tracks = []
         self.max_misses = max_misses
@@ -80,8 +90,12 @@ class MultiObjectTracker:
     @staticmethod
     def _mahalanobis_cost(tracks, det_centroids):
         """
-        Distance de Mahalanobis entre chaque track et chaque détection.
-        Tient compte de l'incertitude KF → seuil adaptatif par track.
+        Compute the Mahalanobis distance cost matrix between predicted track centroids and detected centroids.
+        The cost is set to a high value (1e8) for pairs that are physically implausible (beyond max_euclidian distance).
+        Written with help of Claude.ai
+        Args:
+            tracks: List of Tracker objects representing the current tracks with their Kalman filter states.
+            det_centroids: Numpy array of shape (M, 2) containing the centroids of the current detections.
         """
         N, M = len(tracks), len(det_centroids)
         cost  = np.full((N, M), 1e8)  # Coût élevé par défaut
@@ -148,6 +162,10 @@ class MultiObjectTracker:
         return self._active()
 
 class MOTEvaluator:
+    """
+    MOTEvaluator uses the motmetrics library to evaluate tracking performance.
+    It maintains a MOTAccumulator to accumulate tracking results over frames and computes metrics at the end.
+    """
     def __init__(self):
         self.acc = mm.MOTAccumulator(auto_id=False)
         v_max = 148 / 3.6

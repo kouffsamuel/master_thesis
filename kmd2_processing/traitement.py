@@ -17,7 +17,7 @@ from scipy.interpolate import UnivariateSpline
 # data_path = "/Benson_DATA3/Public/MUSE/"
 # folder_path = f"{data_path}/data_route_2_camionette/"
 data_path = "/DATA_MUSE/"
-folder_path = f"{data_path}/2026_05_20_13_11_41/"
+folder_path = f"{data_path}/2026_05_20_13_30_38/"
 save_video = True
 
 output_video = f"/home/skouff/video.mp4"
@@ -421,24 +421,24 @@ class RealTimeViewer:
 # MAIN
 # ==========================================
 def main():
-    viewer = RealTimeViewer()
-    writer = FFMpegWriter(fps=15)
+    # viewer = RealTimeViewer()
+    # writer = FFMpegWriter(fps=15)
 
-    with writer.saving(viewer.fig, output_video, dpi=200):
-        for i in range(100, len(raw_files)):
-            print(f"Processing frame {i}/{len(raw_files)}")
-            viewer.update(i)
-            if save_video:
-                writer.grab_frame()
+    # with writer.saving(viewer.fig, output_video, dpi=200):
+    #     for i in range(100, len(raw_files)):
+    #         print(f"Processing frame {i}/{len(raw_files)}")
+    #         viewer.update(i)
+    #         if save_video:
+    #             writer.grab_frame()
 
-            plt.pause(0.001)
+    #         plt.pause(0.001)
 
-    plt.ioff()
-    plt.show()
-    print("Video saved:", output_video)
+    # plt.ioff()
+    # plt.show()
+    # print("Video saved:", output_video)
     # snr_computation()
     # rcs_computation()
-    # plot_rcs_snr()
+    plot_rcs_snr()
     
 if __name__ == "__main__":
     main()

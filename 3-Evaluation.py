@@ -1,18 +1,26 @@
-import os
 import json
 import argparse
 import torch
 import random
 import numpy as np
+import torch.nn as nn
+
 from dataset.dataset import RADIal
 from dataset.encoder import ra_encoder
 from dataset.dataloader import CreateDataLoaders
-import pkbar
 import torch.nn.functional as F
 from utils.evaluation import run_FullEvaluation
-import torch.nn as nn
 from model.RadViT import RadViT
-def main(config, checkpoint,difficult):
+
+def main(config, checkpoint, difficult):
+    """
+    Main function to run the evaluation of the RadViT model on the RADIal dataset.
+    Taken from FFTRadNet's evaluation script.
+    Args:
+        config (dict): Configuration dictionary loaded from the JSON config file.
+        checkpoint (str): Path to the .pth model checkpoint to load.
+        difficult (bool): Whether to include difficult samples in the evaluation.
+    """
 
     # Setup random seed
     torch.manual_seed(config['seed'])
@@ -44,9 +52,6 @@ def main(config, checkpoint,difficult):
 
     print('===========  Running the evaluation ==================:')
     run_FullEvaluation(net,test_loader,enc,config=config, device=device)
-
-
-
 
 
 if __name__=='__main__':

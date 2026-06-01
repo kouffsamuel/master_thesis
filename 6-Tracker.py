@@ -3,7 +3,7 @@ import cv2
 import json
 import argparse
 import sys
-from matplotlib import gridspec
+from matplotlib import gridspec, patches
 import pandas as pd
 import torch
 import random
@@ -22,10 +22,14 @@ from DBReader.DBReader import SyncReader
 from SignalProcessing import RadarSignalProcessing
 import matplotlib.pyplot as plt
 from utils.tracking import MOTEvaluator, MultiObjectTracker, Tracker
+from utils.sort import Sort
 
 ID_TO_CLASS = {0:'car',1:'truck',2:'bicycle',3:'bus', 4:'person'}
 
-SEQUENCES = ['RECORD@2020-11-22_12.45.05','RECORD@2020-11-22_12.25.47','RECORD@2020-11-22_12.03.47','RECORD@2020-11-22_12.54.38']
+SEQUENCES = ['RECORD@2020-11-22_12.45.05',
+             'RECORD@2020-11-22_12.25.47',
+             'RECORD@2020-11-22_12.03.47',
+             'RECORD@2020-11-22_12.54.38']
 
 
 class RealTimeViewer:
@@ -66,7 +70,6 @@ class RealTimeViewer:
 
     def update(self, pred_boxes, img, tracks=None, frame_idx=0):
 
-        # ================= PREDICTIONS =================
         self.ax_pred.cla()
         self.ax_pred.set_xlim(-50, 50)
         self.ax_pred.set_ylim(0, 100)
@@ -75,33 +78,37 @@ class RealTimeViewer:
         self.ax_pred.invert_xaxis()
         self.ax_pred.grid(True)
         
-        if len(pred_boxes) > 0:
-            boxes = pred_boxes[:, 1:9]
-            labels = pred_boxes[:, -1]
-        else:
-            boxes = []
+        # if len(pred_boxes) > 0:
+        #     # boxes = pred_boxes[:, 1:9]
+        #     # labels = pred_boxes[:, -1]
+        # else:
+        #     boxes = []
 
-        for i, box in enumerate(boxes):
-            corners = np.array(box).reshape(4, 2)
-            polygon = plt.Polygon(
-                corners, closed=True,
-                edgecolor='red', facecolor='none', linewidth=1.5
+        for i, box in enumerate(tracks):
+            #corners = np.array(box).reshape(4, 2)
+            # polygon = plt.Polygon(
+            #     box, closed=True,
+            #     edgecolor='red', facecolor='none', linewidth=1.5
+            # )
+            rect = patches.Rectangle(
+                (box[0], box[1]), box[2]-box[0], box[3]-box[1],
+                edgecolor=self.cmap(box[4] % self.cmap.N), facecolor='none', linewidth=1.5
             )
-            self.ax_pred.add_patch(polygon)
-            cx, cy = corners.mean(axis=0)
-            self.ax_pred.text(
-                cx, cy + 1.5,          
-                ID_TO_CLASS.get(int(labels[i])),
-                color='red',
-                fontsize=8,
-                ha='center', va='bottom'
-            )
+            self.ax_pred.add_patch(rect)
+            # cx, cy = box.mean(axis=0)
+            # self.ax_pred.text(
+            #     cx, cy + 1.5,          
+            #     ID_TO_CLASS.get(int(labels[i])),
+            #     color='red',
+            #     fontsize=8,
+            #     ha='center', va='bottom'
+            # )
         
-        if tracks is not None:
-            for obj in tracks:
-                cx, cy = obj['centroid']
-                self.ax_pred.plot(cx, cy, "go", color=self.cmap(obj['id'] % self.cmap.N), markersize=2, label=f"ID{obj['id']}")
-                self.ax_pred.legend(loc='upper right', markerscale=0.5)
+        # if tracks is not None:
+        #     for obj in tracks:
+        #         # cx, cy = obj.mean(axis=0)
+        #         self.ax_pred.plot(cx, cy, "go", color=self.cmap(obj['id'] % self.cmap.N), markersize=2, label=f"ID{obj['id']}")
+        #         self.ax_pred.legend(loc='upper right', markerscale=0.5)
         # ================= CAMERA =================
         if self.im_cam is None:
             self.im_cam = self.ax_cam.imshow(img)
@@ -119,10 +126,24 @@ class RealTimeViewer:
         while self.paused:
             plt.pause(0.05)
 
-def main(config, checkpoint):
+def corners_to_bbox(corners):
+    # Claude.ai generated function 
+    # corners: array de shape (8,) ou (4,2)
+    score = corners[0]
+    coords = corners[1:9].reshape(4, 2)
+    x1, y1 = coords[:, 0].min(), coords[:, 1].min()
+    x2, y2 = coords[:, 0].max(), coords[:, 1].max()
+    return np.array([x1, y1, x2, y2, score])
+
+def main(config, checkpoint, sort=False, kalman=False):
+    """
+    Main function to run the tracking evaluation on the RADIal dataset.
+    Args:
+        config: Configuration dictionary loaded from a JSON file.
+        checkpoint: Path to the model checkpoint to load.
+    """
 
     # Setup random seed
-    #Evaluation MOTP, MOTA, IDF1
     torch.manual_seed(config['seed'])
     np.random.seed(config['seed'])
     random.seed(config['seed'])
@@ -130,7 +151,10 @@ def main(config, checkpoint):
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     parameters = config['model']['vit']
-    net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], data_mode=config['data_mode'])
+    net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], 
+                 parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], 
+                 data_mode=config['data_mode'])
+
     net.to(device)
 
     enc = ra_encoder(
@@ -151,7 +175,12 @@ def main(config, checkpoint):
     for i, sequence in enumerate(SEQUENCES):
         evaluator = MOTEvaluator()
         print(f"Processing sequence {sequence} ({i+1}/{len(SEQUENCES)})")
-        tracker = MultiObjectTracker(max_misses=8, min_hits=4, mahal_threshold=9.21)
+
+        if sort:
+            tracker = Sort(max_age=8, min_hits=4, iou_threshold=0.3)
+        if kalman:
+            tracker = MultiObjectTracker(max_misses=8, min_hits=4, mahal_threshold=9.21)
+
         Tracker._id_counter = 0 
         db = SyncReader( os.path.join('/Benson_DATA3/Public/RADIal/raw_sequences/', sequence), tolerance=20000, silent=True)
         RSP = RadarSignalProcessing('/home/skouff/master_thesis/CalibrationTable.npy', method='RD', shift=True, device=device)
@@ -163,6 +192,7 @@ def main(config, checkpoint):
             except IndexError:
                 print(f"End of sequence {sequence}")
                 break
+
             img = data['camera']['data']
             idx = data['radar_ch0']['index']
             gt_frame = gt_tracks[(gt_tracks['index'] == idx) & (gt_tracks['dataset'] == sequence)]
@@ -175,8 +205,7 @@ def main(config, checkpoint):
             with torch.no_grad():
                 rd_tensor = torch.from_numpy(rd).permute(2,0,1).unsqueeze(0).to(device).float()
                 outputs = net(rd_tensor) 
-            
-            
+               
             out_obj = outputs['Detection'].detach().cpu().numpy().copy()
 
             predictions = []
@@ -196,16 +225,26 @@ def main(config, checkpoint):
                 predictions.append(object_pred)
 
             predictions = np.concatenate(predictions, axis=0)
+            if sort: 
+                # For Sort tracker, convert boxes to format [x1, y1, x2, y2, conf]
+                predictions = np.array([corners_to_bbox(pred[:-1]) for pred in predictions])
+                if predictions.shape[0] == 0:
+                    predictions = np.empty((0, 5))
+
             active = tracker.update(predictions)
+            
+            if sort:
+                active[:,4] -=1
+                active_tracks = [{ 'centroid': [(t[0] + t[2]) / 2, (t[1] + t[3]) / 2], 'id': int(t[4])} for t in active]
 
             viewer.update(pred_boxes=predictions, img=img, tracks=active, frame_idx=j)
             if not gt_frame.empty:
-                evaluator.update(gt_frame, active, frame_idx=idx)
+                evaluator.update(gt_frame, active_tracks, frame_idx=idx)
             
-            for obj in active:
-                print(f"Frame {j} | ID {obj['id']:3d} | "
-                    f"centroid ({obj['centroid'][0]:.1f}, {obj['centroid'][1]:.1f}) m | "
-                    f"hits={obj['hits']}")
+            # for obj in active:
+            #     print(f"Frame {j} | ID {obj['id']:3d} | "
+            #         f"centroid ({obj['centroid'][0]:.1f}, {obj['centroid'][1]:.1f}) m | "
+            #         f"hits={obj['hits']}")
         all_accs.append(evaluator.acc)
     # Final evaluation
     evaluator.summary(all_accs, SEQUENCES)
@@ -218,8 +257,10 @@ if __name__=='__main__':
                         help='Path to the config file (default: config.json)')
     parser.add_argument('-r', '--checkpoint', default=None, type=str,
                         help='Path to the .pth model checkpoint to resume training')
+    parser.add_argument('--sort', action='store_true', help='Use SORT tracker instead of Kalman', default=False)
+    parser.add_argument('--kalman', action='store_true', help='Use Kalman tracker', default=False)
     args = parser.parse_args()
 
     config = json.load(open(args.config))
 
-    main(config, args.checkpoint)
+    main(config, args.checkpoint, sort=args.sort, kalman=args.kalman)

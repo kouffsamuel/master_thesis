@@ -166,9 +166,19 @@ class RealTimeViewer:
 
 
 def main(config):
+    """
+    Main function to run inference on K-MD2 data and visualize it in real-time.
+    Args: 
+        config: Configuration dictionary loaded from a JSON file.
+    """
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     parameters = config['model']['vit']
-    net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], kmd2=True, data_mode=config['data_mode'])
+
+    net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], 
+                 parameters['neuron'], parameters['mha'], parameters['layer'], 
+                 parameters['dropout'], parameters['n_encoders'], 
+                 kmd2=True, 
+                 data_mode=config['data_mode'])
     net.to(device)
     
     checkpoint = torch.load("/home/skouff/master_thesis/experiments/RadViT_Class/RD_MVIT_AP_0.8352_AR_0.8299_F1_0.8325_best.pth", weights_only=False, map_location='cpu')

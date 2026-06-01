@@ -5,6 +5,10 @@ import torch
 import torch.nn as nn
 from dataset.encoder import ra_encoder
 from model.RadViT import RadViT
+from thop import profile 
+from thop import clever_format
+from model.fourier_net import FFT_Net
+
 
 import mkl_fft
 import numpy as np
@@ -12,6 +16,10 @@ import os
 import time
 
 class Timer: 
+    """
+    Context manager to measure CPU and GPU time for a block of code. 
+    Written with help from Claude.ai.
+    """
     def __init__(self, name, device):
         self.name = name
         self.device = device
@@ -56,6 +64,14 @@ doppler_fft_coef = np.expand_dims(np.repeat(np.expand_dims(hanningWindowDoppler,
 
 # Step 1: Load ADC signal 
 def main(config, sample_id, device='cuda'):
+    """
+    Main function to benchmark the inference time of the model on a single sample.
+    Written with help from Claude.ai.
+    Args:
+        config: Configuration dictionary loaded from a JSON file.
+        sample_id: ID of the sample to benchmark.
+        device: Device to run the benchmark on.
+    """
     timings = {}
     with Timer("1. Load ADC", device) as t:
         adc_signal = os.path.join(config['dataset']['root_dir'],'ADC_Data',"adc_{:06d}.npy".format(sample_id))
@@ -129,34 +145,58 @@ def main(config, sample_id, device='cuda'):
     print(f"  {'TOTAL':<30} {total:>8.2f} ms")
     return timings
 
+def fft_ops_counter(module, input):
+    """
+    Custom FLOPs counter for the FFT_Net module.
+    Claude.ai generated
+    Args:
+        module: The module for which to count FLOPs (should be an instance of FFT_Net).
+        input: The input tensor(s) to the module.
 
+    """
+    N = input[0].shape[-1]
+    num_ffts = input[0].numel() // N
+    module.total_ops += torch.DoubleTensor([5 * N * math.log2(N) * num_ffts])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='FFTRadNet Benchmarking')
     parser.add_argument('-c', '--config', default='config.json',type=str, help='Path to the config file (default: config.json)')
     parser.add_argument('-r', '--checkpoint', default=None, type=str, help='Path to the .pth model checkpoint to resume training')
     args = parser.parse_args()
+    
     config = json.load(open(args.config))
+    
     timings_list = []
     
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     parameters = config['model']['vit']
-    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], data_mode=config['data_mode']), device_ids=[0,1,2])
-    net.to(device)
-    dict = torch.load(args.checkpoint, weights_only=False)
+    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], 
+                                 parameters['W'], parameters['neuron'], parameters['mha'], 
+                                 parameters['layer'], parameters['dropout'], 
+                                 parameters['n_encoders'], data_mode=config['data_mode']), device_ids=[0,1,2])
+    
+    dict = torch.load(args.checkpoint, map_location=device, weights_only=False)
     net.load_state_dict(dict['net_state_dict'])
+    net.to(device)
 
     print("Warming up GPU...")
     if config['data_mode'] == 'ADC':
         dummy = torch.zeros((1, 16, numSamplePerChirp, numChirps)).to(device).type(torch.complex64)
     else:
         dummy = torch.zeros((1, 32, numSamplePerChirp, numChirps)).to(device).float()
+
     for _ in range(10):
         with torch.set_grad_enabled(False):
             _ = net(dummy)
     torch.cuda.synchronize()
+
     print("Warmup done.\n")
+    print("Computing FLOPs and parameters...")
+    macs, params = profile(net.module, inputs=(dummy,), verbose=False, custom_ops={FFT_Net: fft_ops_counter})
+    flops = 2 * macs  # FLOPs = 2 * MACs
+    flops_str, params_str = clever_format([flops, params], "%.3f")
+    print(f"Model FLOPs: {flops_str} | Parameters: {params_str}\n")
 
     for i, file in enumerate(os.listdir(config['dataset']['root_dir'] + '/ADC_Data')):
         if file.endswith('.npy'):

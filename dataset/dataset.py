@@ -41,12 +41,12 @@ class RADIal(Dataset):
             ids_filters = np.unique(np.concatenate(ids_filters))
             self.labels = self.labels[ids_filters]
 
-        if(difficult==True):
-            ids_filters=[]
-            ids = np.where( self.labels[:, 16] == 1)[0]
-            ids_filters.append(ids)
-            ids_filters = np.unique(np.concatenate(ids_filters))
-            self.labels = self.labels[ids_filters]
+        # if(difficult==True):
+        #     ids_filters=[]
+        #     ids = np.where( self.labels[:, 16] == 1)[0]
+        #     ids_filters.append(ids)
+        #     ids_filters = np.unique(np.concatenate(ids_filters))
+        #     self.labels = self.labels[ids_filters]
 
 
         # Gather each input entries by their sample id

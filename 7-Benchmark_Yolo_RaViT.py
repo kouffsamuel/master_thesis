@@ -19,6 +19,7 @@ import torch.nn as nn
 from dataset.dataset import RADIal
 from dataset.dataloader import CreateDataLoaders
 from sklearn.metrics import average_precision_score, precision_recall_curve, confusion_matrix
+import seaborn as sns
 
 sys.path.insert(0, '/home/skouff/RADIal/')
 from DBReader.DBReader import SyncReader
@@ -42,19 +43,19 @@ def yolo_bbox_to_RA(xyxy):
     return range_m, angle
 
 
-def collect_detections(all_frames, iou_treshold=0.5):
+def collect_detections(all_frames, iou_threshold=0.5, confidence_threshold=0.05):
     radar_detections = []
     yolo_detections = []
 
     for (object_pred, true_obj, ground_truth_box_corners, 
          yolo_box_corners, ground_truth_box_gt_corners, yolo_cls, yolo_conf) in all_frames:
-            
-            if len(ground_truth_box_gt_corners) > 0 and len(yolo_box_corners) > 0:
+            yolo_box_corners_filtered = [box for id, box in enumerate(yolo_box_corners) if yolo_conf[id] >= confidence_threshold]
+            if len(ground_truth_box_gt_corners) > 0 and len(yolo_box_corners_filtered) > 0:
                 used_gt_yolo = np.zeros(len(ground_truth_box_gt_corners))
 
-                for yolo_box_id, prediction_yolo in enumerate(yolo_box_corners):
+                for yolo_box_id, prediction_yolo in enumerate(yolo_box_corners_filtered):
                     iou = bbox_iou(prediction_yolo, ground_truth_box_gt_corners)
-                    ids = np.where(iou >= iou_treshold)[0]
+                    ids = np.where(iou >= iou_threshold)[0]
                     if len(ids) > 0:
                         best_pred = ids[np.argmax(iou[ids])]
                         if used_gt_yolo[best_pred] == 0:
@@ -63,29 +64,32 @@ def collect_detections(all_frames, iou_treshold=0.5):
                                 'conf': yolo_conf[yolo_box_id],
                                 'pred_cls': yolo_cls[yolo_box_id],
                                 'gt_cls': int(true_obj[best_pred, -1]),
-                                'TP': yolo_cls[yolo_box_id] == int(true_obj[best_pred, -1])
+                                'det_TP': True,
+                                'cls_TP': yolo_cls[yolo_box_id] == int(true_obj[best_pred, -1])
                             })
                         else:
                             yolo_detections.append({
                                 'conf': yolo_conf[yolo_box_id],
                                 'pred_cls': yolo_cls[yolo_box_id],
                                 'gt_cls': int(true_obj[best_pred, -1]),
-                                'TP': False
+                                'det_TP': False,
+                                'cls_TP': False
                             })
                     else:
                         yolo_detections.append({
                             'conf': yolo_conf[yolo_box_id],
                             'pred_cls': yolo_cls[yolo_box_id],
                             'gt_cls': -1,
-                            'TP': False
+                            'det_TP': False,
+                            'cls_TP': False
                         })
                 
-            
-            if len(ground_truth_box_corners) > 0 and len(object_pred) > 0:
+            object_pred_filtered = [p for p in object_pred if p[0] >= confidence_threshold]
+            if len(ground_truth_box_corners) > 0 and len(object_pred_filtered) > 0:
                 used_gt = np.zeros(len(ground_truth_box_corners))
-                for prediction in object_pred:
+                for prediction in object_pred_filtered:
                     iou = bbox_iou(prediction[1:9], ground_truth_box_corners)
-                    ids = np.where(iou >= iou_treshold)[0]
+                    ids = np.where(iou >= iou_threshold)[0]
                     if len(ids) > 0:
                         best_pred = ids[np.argmax(iou[ids])]
                         if used_gt[best_pred] == 0:
@@ -131,7 +135,7 @@ def compute_mAP(detections):
             APs.append(0.0)
             continue
 
-        y_true = [1 if d['TP'] else 0 for d in cls_detections]
+        y_true = [1 if d['cls_TP'] else 0 for d in cls_detections]
         y_scores = [d['conf'] for d in cls_detections]
 
         if(sum(y_true) == 0):
@@ -144,8 +148,8 @@ def compute_mAP(detections):
     return np.mean(APs)
 
 def compute_detection_metrics(detections, gt_counts):
-    TP = sum(1 for d in detections if d['TP'])
-    FP = sum(1 for d in detections if not d['TP'])
+    TP = sum(1 for d in detections if d['det_TP'])
+    FP = sum(1 for d in detections if not d['det_TP'])
     FN = sum(gt_counts.values()) - TP
 
     precision = TP / (TP + FP) if (TP + FP) > 0 else 0
@@ -154,12 +158,13 @@ def compute_detection_metrics(detections, gt_counts):
     
     return precision, recall, f1
 
+
 def compute_confusion_matrix(detections, gt_counts):
     y_true = []
     y_pred = []
     
     for d in detections:
-        if d['gt_cls'] != -1 and d['TP'] == True: 
+        if d['gt_cls'] != -1 and d['det_TP'] == True: 
             if gt_counts[ID_TO_CLASS[d['gt_cls']]] < MIN_GT:
                 continue
             if gt_counts[ID_TO_CLASS[d['gt_cls']]] == 0:
@@ -172,6 +177,13 @@ def compute_confusion_matrix(detections, gt_counts):
 
 
 def main(config, checkpoint, difficult):
+    """
+    Main function to evaluate performance classification and detection of RadViT and YOLO26 models.
+    Args:
+        config: Configuration dictionary loaded from a JSON file.
+        checkpoint: Path to the model checkpoint to load.
+        difficult: Whether to include difficult samples in the evaluation.
+    """
 
     torch.manual_seed(config['seed'])
     np.random.seed(config['seed'])
@@ -196,7 +208,7 @@ def main(config, checkpoint, difficult):
 
     net.to(device)
 
-    yolo26 = YOLO('/home/skouff/master_thesis/dataset/yolo26x.pt')
+    yolo26 = YOLO('/home/skouff/master_thesis/dataset/yolo26n.pt')
 
     db_cache = {}
 
@@ -274,7 +286,7 @@ def main(config, checkpoint, difficult):
             pred_decoded = np.asarray(enc.decode(pred_obj,0.05))
 
             if len(pred_decoded) > 0:
-                object_pred = process_predictions_FFT(pred_decoded, confidence_threshold=0.5)
+                object_pred = process_predictions_FFT(pred_decoded, confidence_threshold=0.05)
             
             if len(object_pred) > 0:
                 dist = (object_pred[:, 2] + object_pred[:, 4]) / 2
@@ -302,18 +314,73 @@ def main(config, checkpoint, difficult):
             ground_truth_box_gt_corners = np.asarray(ground_truth_box_gt_corners)
             all_frames.append((object_pred, true_obj, ground_truth_box_corners, yolo_box_corners, ground_truth_box_gt_corners, yolo_cls, yolo_conf))
         
-        # with open("all_frames_yolo26n.pkl", "wb") as f:
-        #     pickle.dump(all_frames, f)
+        with open("all_frames_radvit_adc_cls_2.pkl", "wb") as f:
+            pickle.dump(all_frames, f)
+    
+    # with open("all_frames_yolo26n.pkl", "rb") as f:
+    #     all_frames = pickle.load(f)
 
-    radar_detections, yolo_detections = collect_detections(all_frames, iou_treshold=0.5)
+    radar_detections, yolo_detections = collect_detections(all_frames, iou_threshold=0.5, confidence_threshold=0.5)
+    cm_radvit = compute_confusion_matrix(radar_detections, gt_count)
+    cm_yolo = compute_confusion_matrix(yolo_detections, gt_count)
 
-    p, r, f1 = compute_detection_metrics(radar_detections, gt_count)
-    print(f"RadViT Detection  - Precision: {p:.4f}, Recall: {r:.4f}, F1: {f1:.4f}")
+    CLASS_NAMES = ['car', 'truck']
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    for ax, cm, title in zip(axes, [cm_radvit, cm_yolo], ['RadViT (ADC)', 'YOLO26n']):
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                    xticklabels=CLASS_NAMES,
+                    yticklabels=CLASS_NAMES,
+                    ax=ax)
+        ax.set_xlabel('Predicted')
+        ax.set_ylabel('Ground Truth')
+        ax.set_title(f'Confusion Matrix — {title}')
 
-    p, r, f1 = compute_detection_metrics(yolo_detections, gt_count)
-    print(f"YOLO   Detection  - Precision: {p:.4f}, Recall: {r:.4f}, F1: {f1:.4f}")
+    plt.tight_layout()
+    plt.savefig('confusion_matrices_yolo26n_rd.svg')
+    plt.show()
+    
+
+    # p, r, f1 = compute_detection_metrics(radar_detections, gt_count)
+    # print(f"RadViT Detection  - Precision: {p:.4f}, Recall: {r:.4f}, F1: {f1:.4f}")
+
+    # precisions, recalls = [], []
+    # precision_yolo, recalls_yolo = [], []
+    # for conf_thresh in np.arange(0.1, 0.96, 0.1):
+    #     radar_det, yolo_det = collect_detections(all_frames, iou_threshold=0.5, confidence_threshold=conf_thresh)
+    #     p, r, _ = compute_detection_metrics(radar_det, gt_count)
+    #     p_yolo, r_yolo, _ = compute_detection_metrics(yolo_det, gt_count)
+
+    #     precisions.append(p)
+    #     recalls.append(r)
+
+    #     precision_yolo.append(p_yolo)
+    #     recalls_yolo.append(r_yolo)
+
+    # mAP = np.mean(precisions)
+    # mAR = np.mean(recalls)
+    # F1 = 2 * mAP * mAR / (mAP + mAR)
+    # print(f"RadViT Detection  - mAP: {mAP:.4f}, mAR: {mAR:.4f}, F1: {F1:.4f}")
+
+    # mAP_yolo = np.mean(precision_yolo)
+    # mAR_yolo = np.mean(recalls_yolo)
+    # F1_yolo = 2 * mAP_yolo * mAR_yolo / (mAP_yolo + mAR_yolo)
+    # print(f"YOLO26n   Detection  - mAP: {mAP_yolo:.4f}, mAR: {mAR_yolo:.4f}, F1: {F1_yolo:.4f}")
+
+    # p, r, f1 = compute_detection_metrics(yolo_detections, gt_count)
+    # print(f"YOLO   Detection  - Precision: {p:.4f}, Recall: {r:.4f}, F1: {f1:.4f}")
 
     # thresholds = np.arange(0.5, 1.0, 0.05)
+    # for thresh in thresholds:
+    #     precisions = []
+    #     print(f"======== AP@{thresh*100:.0f}: ========")
+    #     for conf_tresh in np.arange(0.1, 0.96, 0.1):
+    #         radar_det, yolo_det = collect_detections(all_frames, iou_threshold=thresh, confidence_threshold=conf_tresh)
+    #         p_radar, r_radar, _ = compute_detection_metrics(radar_det, gt_count)
+    #         precisions.append(p_radar)
+    #     print(f"RadViT   Detection  - mAP: {np.mean(precisions):.4f}")
+
+
+
     # print(f"RadViT Evaluation :")
     # print("======== AP@50: ========")
     # mAP50 = compute_mAP(radar_detections)

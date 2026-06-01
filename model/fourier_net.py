@@ -7,6 +7,10 @@ from cplxmodule.nn import RealToCplx, CplxToReal
 import torch.nn as nn
 import torch.nn.functional as F
 
+"""
+fourier_net.py from T-FFTRadNet.
+"""
+
 class Range_Fourier_Net(nn.Module):
     def __init__(self):
         super(Range_Fourier_Net, self).__init__()

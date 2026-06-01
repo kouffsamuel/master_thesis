@@ -23,13 +23,21 @@ from utils.evaluation import run_evaluation
 import torch.nn as nn
 
 def main(config=None, resume=None, exp_name=None): 
+    """
+    Main function to train RadViT, adapted from FFTRadNet's training pipeline 
+    to align with RadViT's architecture and training procedure.
+    Args:
+        config (dict): Configuration dictionary loaded from JSON file.
+        resume (str | None): Path to a checkpoint to resume training from. Defaults to None.
+        exp_name (str | None): Name of the experiment for logging and checkpointing. Defaults to None.
+    """
     # Setup random seed
     torch.manual_seed(config['seed'])
     np.random.seed(config['seed'])
     random.seed(config['seed'])
     torch.cuda.manual_seed(config['seed'])
 
-    output_folder = config['output']['dir']#Path(config['output']['dir'])
+    output_folder = config['output']['dir']
 
     # Create directory structure
     if not os.path.exists(os.path.join(output_folder,exp_name)):
@@ -48,9 +56,15 @@ def main(config=None, resume=None, exp_name=None):
     # Create the model
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     parameters = config['model']['vit']
-    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], data_mode=config['data_mode']), device_ids=[0,1,2])
+    net = nn.DataParallel(RadViT(parameters['D'], parameters['p'], parameters['H'], 
+                                 parameters['W'], parameters['neuron'], parameters['mha'], 
+                                 parameters['layer'], parameters['dropout'], parameters['n_encoders'], 
+                                 data_mode=config['data_mode']), device_ids=[0,1,2])
     net.to(device)
 
+    # To support both input mode ADC and RD, we load the corresponding 
+    # pretrained weights for the detection head and DFT module for ADC, 
+    # while keeping the rest of the model randomly initialized. 
     if config['data_mode'] == 'ADC':
         checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_ADC.pth", weights_only=False, map_location='cpu')
         model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection') or k.startswith('DFT')}
@@ -92,10 +106,11 @@ def main(config=None, resume=None, exp_name=None):
     print('      num_epochs:', num_epochs)
     print('')
 
-    # Train
     startEpoch = 0
     global_step = 0
     history = {'train_loss':[],'val_loss':[],'lr':[],'mAP':[],'mAR':[]}
+
+    # Check for existing best checkpoint to continue training from the best F1-score, if any
     best_f1 = 0
     best_files = glob.glob(os.path.join(output_folder, exp_name, '*best.pth'))
     for f in best_files:
@@ -117,7 +132,7 @@ def main(config=None, resume=None, exp_name=None):
         history = dict['history']
         global_step = dict['global_step']
 
-        print('       ... Start at epoch:',startEpoch)
+        print('      ... Start at epoch:',startEpoch)
 
 
     for epoch in range(startEpoch,num_epochs):

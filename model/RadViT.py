@@ -203,12 +203,13 @@ class RadViT(nn.Module):
 
     def forward(self, x, x_mask=None):
         B = x.shape[0]  # batch
-        T = x.shape[1]  # number of antennas (or channels)
         
         if self.data_mode == 'ADC':
-            x = torch.view_as_complex(x)
+            if not x.is_complex():
+                x = torch.view_as_complex(x.contiguous())
             x = self.DFT(x)
-        
+    
+        T = x.shape[1] 
         antenna_outputs = []
         for i in range(T//2):
             re = x[:, i, :, :]
@@ -258,6 +259,6 @@ class RadViT(nn.Module):
             feat0 = self.feat_0(base_up8)
 
         out = self.ra_decoder([feat0, feat1, feat2, feat3])  # (B, 256, 128, 224)
-        out = self.detection_head(out)                      # (B,   3, 128, 224)
+        out = self.detection_head(out)                      # (B,   8, 128, 224)
 
         return {"Detection": out}
