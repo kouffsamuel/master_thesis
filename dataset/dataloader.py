@@ -3,6 +3,14 @@ from torch.utils.data import Dataset, DataLoader, DistributedSampler, random_spl
 import numpy as np
 import torch
 
+"""
+Dataloader script for the RADIal dataset. It includes a custom collate function to handle the specific structure of the data,
+and a function to create data loaders for training, validation, and testing. The data can be split either randomly or by sequence, 
+depending on the configuration. 
+The collate function ensures that the radar FFTs, segmentation maps, labels, and images are properly batched together for input into the model.
+Taken from FFTRadNet codebase, with modifications for the specific needs of this thesis.
+"""
+
 
 Sequences = {'Validation':
              ['RECORD@2020-11-22_12.49.56',

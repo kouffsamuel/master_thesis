@@ -7,37 +7,14 @@ MAX_MISSES = 40
 GATE_THRESHOLD = 5
 
 class Tracking:
+    """
+    A class for tracking objects in the dataset. Based on a Kalman filter for state estimation and the Hungarian algorithm for data association.
+    This tracking class is for tracking cluster centroids in the Range-Doppler space to compute SNR and RCS values for the detected objects.
+    """
     
     def __init__(self):
         self.tracks = []
         self.track_id = 0
-    # def make_track(self, initial_doppler, initial_range):
-    #     kf = KalmanFilter(dim_x=2, dim_z=2)
-
-    #     kf.F = np.array([[1, 0],
-    #                      [0, 1]])
-
-    #     kf.H = np.array([
-    #         [1, 0],  # range
-    #         [0, 1]   # doppler
-    #     ])
-    #     kf.R *=  0.9 # Confidence in measurements
-    #     kf.P *= 10.0 # Initial uncertainty
-    #     kf.Q = np.diag([
-    #         0.1,   # range   → cible lente, modèle fiable
-    #         25.0   # doppler → micro-doppler piéton, très variable
-    #     ])
-
-    #     kf.x = np.array([[initial_range],
-    #              [initial_doppler]])
-
-    #     kf.hits = 1
-    #     kf.misses = 0
-    #     kf.is_confirmed = False
-    #     kf.power_history = []
-    #     kf.track_id = None
-
-    #     return kf
     
     def make_track(self, initial_doppler, initial_range):
         kf = KalmanFilter(dim_x=4, dim_z=2)
@@ -116,13 +93,6 @@ class Tracking:
                 matches.append((r, c))
                 unmatched_tracks.remove(r)
                 unmatched_clusters.remove(c)
-            # dr = tracks[r].state[1] - clusters[c]["centroid"][1]
-            # dd = tracks[r].state[0] - clusters[c]["centroid"][0]
-
-            # if abs(dr) < 5 and abs(dd) < 10:
-            #     matches.append((r, c))
-            #     unmatched_tracks.remove(r)
-            #     unmatched_clusters.remove(c)
 
         return matches, unmatched_tracks, unmatched_clusters
         

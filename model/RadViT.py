@@ -8,6 +8,14 @@ from utils.pos_embed import get_2d_sincos_pos_embed
 from model.fourier_net import FFT_Net
 from model.ViT import Encoder, PatchEmbed, PositionalEncoding
 
+"""
+RadViT: A Vision transformer based architecture for radar object detection
+This file contains the implementation of the RadViT model, which is a vision transformer based architecture for radar object detection. 
+The model consists of a patch embedding layer, positional encoding, multiple encoder layers, and a range-angle decoder followed by a detection head. 
+The model can be trained end-to-end for object detection in radar data.
+Written with help of Claude.ai
+"""
+
 def conv3x3(in_planes, out_planes, stride=1, bias=False):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -250,7 +258,7 @@ class RadViT(nn.Module):
             base_up4 = F.interpolate(y, size=(128, 16), mode='bilinear', align_corners=False)
             feat0 = self.feat_0(base_up4)                                                   # (B,   D, 128, 16)
         else:
-            feat3 = self.feat_3(y)                                                          # (B,  16,  16, 16) ← y directement, plus besoin d'avg_pool
+            feat3 = self.feat_3(y)                                                          # (B,  16,  16, 16)
             base_up2 = F.interpolate(y, size=(32, 16),  mode='bilinear', align_corners=False)
             feat2 = self.feat_2(base_up2)                                                   # (B, 192,  32, 16)
             base_up4 = F.interpolate(y, size=(64, 16),  mode='bilinear', align_corners=False)

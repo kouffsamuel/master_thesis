@@ -10,7 +10,7 @@ import random
 import numpy as np
 from utils.metrics import process_predictions_FFT, RA_to_cartesian_box
 from dataset.dataset import RADIal
-from dataset.encoder import ra_encoder
+# from dataset.encoder import ra_encoder
 from torch.utils.data import Dataset, DataLoader, DistributedSampler, random_split,Subset
 import torch.nn.functional as F
 from utils.evaluation import run_FullEvaluation
@@ -18,8 +18,11 @@ import torch.nn as nn
 from model.RadViT import RadViT
 from dataset.dataloader import RADIal_collate
 sys.path.append('/home/skouff/RADIal')
+sys.path.append('/home/skouff/T_FFTRadNet')
 from DBReader.DBReader import SyncReader
 from SignalProcessing import RadarSignalProcessing
+from RadIal.model.FFTRadNet_ViT import FFTRadNet_ViT
+from RadIal.dataset.encoder import ra_encoder
 import matplotlib.pyplot as plt
 from utils.tracking import MOTEvaluator, MultiObjectTracker, Tracker
 from utils.sort import Sort
@@ -68,7 +71,7 @@ class RealTimeViewer:
             plt.close('all')
             os._exit(0)
 
-    def update(self, pred_boxes, img, tracks=None, frame_idx=0):
+    def update(self, sort, kalman, pred_boxes, img, tracks=None, frame_idx=0):
 
         self.ax_pred.cla()
         self.ax_pred.set_xlim(-50, 50)
@@ -78,23 +81,28 @@ class RealTimeViewer:
         self.ax_pred.invert_xaxis()
         self.ax_pred.grid(True)
         
-        # if len(pred_boxes) > 0:
-        #     # boxes = pred_boxes[:, 1:9]
-        #     # labels = pred_boxes[:, -1]
-        # else:
-        #     boxes = []
+        if len(pred_boxes) > 0 and kalman:
+            boxes = pred_boxes[:, 1:9]
+            # labels = pred_boxes[:, -1]
+        elif sort:
+            boxes = pred_boxes
+        else:  
+            boxes = []
 
-        for i, box in enumerate(tracks):
-            #corners = np.array(box).reshape(4, 2)
-            # polygon = plt.Polygon(
-            #     box, closed=True,
-            #     edgecolor='red', facecolor='none', linewidth=1.5
-            # )
-            rect = patches.Rectangle(
-                (box[0], box[1]), box[2]-box[0], box[3]-box[1],
-                edgecolor=self.cmap(box[4] % self.cmap.N), facecolor='none', linewidth=1.5
-            )
-            self.ax_pred.add_patch(rect)
+        for i, box in enumerate(boxes):
+            if kalman:
+                corners = np.array(box).reshape(4, 2)
+                polygon = plt.Polygon(
+                    corners, closed=True,
+                    edgecolor='red', facecolor='none', linewidth=1.5
+                )
+                self.ax_pred.add_patch(polygon)
+            else:
+                rect = patches.Rectangle(
+                    (box[0], box[1]), box[2]-box[0], box[3]-box[1],
+                    edgecolor="red", facecolor='none', linewidth=1.5
+                )
+                self.ax_pred.add_patch(rect)
             # cx, cy = box.mean(axis=0)
             # self.ax_pred.text(
             #     cx, cy + 1.5,          
@@ -104,11 +112,11 @@ class RealTimeViewer:
             #     ha='center', va='bottom'
             # )
         
-        # if tracks is not None:
-        #     for obj in tracks:
-        #         # cx, cy = obj.mean(axis=0)
-        #         self.ax_pred.plot(cx, cy, "go", color=self.cmap(obj['id'] % self.cmap.N), markersize=2, label=f"ID{obj['id']}")
-        #         self.ax_pred.legend(loc='upper right', markerscale=0.5)
+        if tracks is not None:
+            for obj in tracks:
+                cx, cy = obj['centroid']
+                self.ax_pred.plot(cx, cy, "go", color=self.cmap(obj['id'] % self.cmap.N), markersize=2, label=f"ID{obj['id']}")
+                self.ax_pred.legend(loc='upper right', markerscale=0.5)
         # ================= CAMERA =================
         if self.im_cam is None:
             self.im_cam = self.ax_cam.imshow(img)
@@ -150,10 +158,20 @@ def main(config, checkpoint, sort=False, kalman=False):
     torch.cuda.manual_seed(config['seed'])
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    parameters = config['model']['vit']
-    net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], 
-                 parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], 
-                 data_mode=config['data_mode'])
+    # parameters = config['model']['vit']
+    # net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], 
+    #              parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], 
+    #              data_mode=config['data_mode'])
+    net = FFTRadNet_ViT(patch_size = config['model']['patch_size'],
+                        channels = config['model']['channels'],
+                        in_chans = config['model']['in_chans'],
+                        embed_dim = config['model']['embed_dim'],
+                        depths = config['model']['depths'],
+                        num_heads = config['model']['num_heads'],
+                        drop_rates = config['model']['drop_rates'],
+                        regression_layer = 2,
+                        detection_head = config['model']['DetectionHead'],
+                        segmentation_head = config['model']['SegmentationHead'])
 
     net.to(device)
 
@@ -164,8 +182,8 @@ def main(config, checkpoint, sort=False, kalman=False):
     )
 
     dict = torch.load(checkpoint, weights_only=False)
-    dict = {k.replace('module.', ''): v for k, v in dict['net_state_dict'].items()}
-    net.load_state_dict(dict)
+    # dict = {k.replace('module.', ''): v for k, v in dict['net_state_dict'].items()}
+    net.load_state_dict(dict['net_state_dict'])
     net.eval()
 
     viewer = RealTimeViewer()
@@ -236,10 +254,11 @@ def main(config, checkpoint, sort=False, kalman=False):
             if sort:
                 active[:,4] -=1
                 active_tracks = [{ 'centroid': [(t[0] + t[2]) / 2, (t[1] + t[3]) / 2], 'id': int(t[4])} for t in active]
+                active = active_tracks
 
-            viewer.update(pred_boxes=predictions, img=img, tracks=active, frame_idx=j)
+            viewer.update(sort, kalman, pred_boxes=predictions, img=img, tracks=active, frame_idx=j)
             if not gt_frame.empty:
-                evaluator.update(gt_frame, active_tracks, frame_idx=idx)
+                evaluator.update(gt_frame, active, frame_idx=idx)
             
             # for obj in active:
             #     print(f"Frame {j} | ID {obj['id']:3d} | "

@@ -4,6 +4,9 @@ import torch
 from torch.autograd import Variable
 import math
 
+"""
+Vision Transformer backbone
+"""
 
 # Projection des vecteurs de dimensions inp_size vers la dimension d_model
 class LinearEmbedding(nn.Module):

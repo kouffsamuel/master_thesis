@@ -2,13 +2,17 @@ import sys
 sys.path.insert(0, '../')
 
 from dataset.dataset import RADIal
-from dataset.encoder import rd_encoder
+from dataset.encoder import rd_encoder, ra_encoder
 
 import numpy as np
-
+"""
+File for computing the mean and standard deviation of the radar FFT data in the RADIal dataset, 
+which will be used for normalization during training.
+Taken from FFTRadNet codebase, with modifications for the specific needs of this thesis.
+"""
 
 geometry = {    "ranges": [512,256,1],
-                "resolution": [0.201171875,0.1],
+                "resolution": [0.201171875,0.2],
                 "size": 3}
 
 statistics = {  "input_mean":np.zeros(32),
@@ -17,9 +21,10 @@ statistics = {  "input_mean":np.zeros(32),
                 "reg_std":np.ones(3)}
 
 # Can also use ra_encoder, just replace rd_encoder with ra_encoder
-enc = rd_encoder(geometry = geometry,
-                    statistics = statistics,
-                    regression_layer = 2)
+# enc = rd_encoder(geometry = geometry,
+#                     statistics = statistics,
+#                     regression_layer = 2)
+enc = ra_encoder(geometry = geometry, statistics = statistics,regression_layer = 2)
 
 dataset = RADIal(root_dir = "/Benson_DATA3/Public/RADIal/ready_to_use/RADIal",
                        statistics=None,

@@ -1,6 +1,11 @@
 import os 
 import numpy as np
 import cupy as cp
+"""
+File for computing the mean and standard deviation of the radar FFT data in the dataset, which will be used for normalization during training.
+This Script is specific for K-MD2 data as it not provides regression labels, so it only computes the statistics for the input radar data.
+The resulting mean and standard deviation will be printed to the console, and can be used in the data preprocessing steps for training the model.
+"""
 folder_path_prise_1 = '/Benson_DATA3/Public/MUSE/data_route_2_camionette/RD_shift_hamming'
 
 m = cp.zeros(6)

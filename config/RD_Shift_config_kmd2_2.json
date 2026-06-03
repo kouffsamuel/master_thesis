@@ -3,13 +3,6 @@
     "seed":3,
     "data_mode":"Custom_RD",
     "model": {
-        "depths": [2,2,6,2],
-        "channels": [32,40,48,56],
-        "patch_size": 2,
-        "in_chans": 32,
-        "embed_dim": 48,
-        "drop_rates": [0.0,0.0,0.0],
-        "num_heads": [3,6,12,24],
         "DetectionHead": "True",
         "SegmentationHead": "False",
         "vit":{
@@ -43,14 +36,6 @@
         "classification": "FocalLoss",
         "regression": "SmoothL1Loss",
         "weight": [2,100, 1]
-    },
-    "lr_scheduler": {
-        "step_size": 10,
-        "gamma": 0.9
-    },
-    "asam": {
-        "rho": 0.5,
-        "eta": 0.01
     },
     "optimizer": {
         "lr": 1e-4

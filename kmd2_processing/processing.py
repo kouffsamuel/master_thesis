@@ -1,27 +1,30 @@
+from collections import defaultdict
 import os
 import numpy as np
 from pathlib import Path
 from PIL import Image
 import matplotlib.pyplot as plt
 from matplotlib.animation import FFMpegWriter
-
 from cfar import CA_CFAR
+from tracking import Tracking
+from sklearn.cluster import DBSCAN, HDBSCAN
+from scipy.interpolate import UnivariateSpline
+
 
 # ==========================================
 # PATHS
 # ==========================================
-# data_path = "/Benson_DATA3/Public/MUSE/"
 data_path = "/DATA_MUSE/"
-folder_path = f"{data_path}/2026_05_19_16_35_13/"
-save_video = False
+folder_path = f"{data_path}/2026_05_20_13_30_38/"
+save_video = True
 
-# output_video = f"{folder_path}/video_70_80.mp4"
-dir_raw = Path(f"{folder_path}/raw")
-dir_camera = Path(f"{folder_path}/jpeg")
-# background = np.load(f"{data_path}/background_70_80.npy")
-# background = np.load(f"{data_path}/background_70_80_raw.npy")
-# bg_power = np.load(f"{data_path}/background_puissance.npy")
-# save_path = f"{folder_path}/RD_shift_hamming"
+output_video = f"/home/skouff/video.mp4"
+dir_raw = Path(f"{folder_path}/radar")
+dir_camera = Path(f"{folder_path}/camera")
+background = np.load(f"/Benson_DATA3/Public/MUSE/background_db.npy")
+background_puissance = np.load(f"/Benson_DATA3/Public/MUSE/background_puissance.npy")
+save_path = Path("/home/skouff/master_thesis/kmd2_processing/")
+
 
 # ==========================================
 # RADAR PARAMETERS
@@ -68,68 +71,250 @@ def get_complex_content(file):
     size = 2 * 256 * 256
     for i in range(3):
         sub = arr[i*size:(i+1)*size]
-        print(f"RX {i} — mean: {sub.mean():.1f}, std: {sub.std():.1f}")
         content[i] = (sub[0::2] + 1j * sub[1::2]).reshape((256, 256))
     return content
 
-
-def FFT_RD(RX):
-    # window_doppler = np.hamming(RX.shape[0])
-    # window_range = np.hamming(RX.shape[1])
-
-    # rx = RX * window_doppler[:, None] * window_range[None, :]
+def FFT(RX):
     window = np.hamming(256)
     rx = RX * window[:, None]
-    fft = np.fft.fft2(RX, axes=(0, 1))
-    rd = np.fft.fftshift(fft, axes=0)  # center only Doppler
-    return np.abs(rd) #np.abs(rd), garde que reel et imaginaire = 0
+    fft = np.fft.fft2(RX)
+    rd = np.fft.fftshift(fft, axes=0)
+    return np.abs(rd)
 
-def FFT_RA(RX):
-    window_range = np.hamming(RX.shape[0])
-    window_angle = np.hamming(RX.shape[1])
-    rx = RX * window_range[:, None] * window_angle[None, :]
-    fft = np.fft.fft2(rx)
-    ra = np.fft.fftshift(fft, axes=1)
-    return np.abs(ra)
 
-def compute_rd(file):
+def compute_rd_db(file):
     content = get_complex_content(file)
-    radar_FFT = np.stack([FFT_RD(content[i]) for i in range(3)], axis=2)
-    RD_avg = np.mean(radar_FFT, axis=2)
+    RX1 = FFT(content[0])
+    RX2 = FFT(content[1])
+    RX3 = FFT(content[2])
+
+    RD_avg = (RX1 + RX2 + RX3) / 3
     magn = 20 * np.log10(RD_avg + 1e-6)
     rd_db = np.clip(magn, 0, None)
     return rd_db
-    # radar_FFT = np.stack([FFT_RD(content[i]) for i in range(3)], axis=2)
 
-    # rd_power = np.abs(radar_FFT) ** 2                             # puissance du signal
-    # rd_power_sub = rd_power / bg_power    # soustraction, pas de négatif
-    # rd_amp_sub = np.sqrt(rd_power_sub)                     # nouvelle amplitude
+def FFT_P(RX):
+    window = np.hamming(256)
+    rx = RX * window[:, None]
+    fft = np.fft.fft2(RX)
+    rd = np.fft.fftshift(fft, axes=0)
+    return np.abs(rd) ** 2
 
-    # # Reconstruction complexe : amplitude corrigée + phase originale conservée
-    # rd_sub = rd_amp_sub * np.exp(1j * np.angle(radar_FFT))        # (256, 256, 3) complex
-
-    # radar_FFT = np.concatenate([radar_FFT.real, radar_FFT.imag], axis=2)
-    return radar_FFT
-
-def compute_ra(file):
+def compute_rd_power(file, without_background=False):
     content = get_complex_content(file)
+    RX1 = FFT_P(content[0])
+    RX2 = FFT_P(content[1])
+    RX3 = FFT_P(content[2])
 
-    window_range = np.hamming(256)
-    range_fft = np.fft.fft(content * window_range[None, None, :], axis=2)
-    range_fft = range_fft[:, :, :128]  # keep only positive frequencies
+    RD_avg = (RX1 + RX2 + RX3) / 3
+    rd_sub = RD_avg / background_puissance if without_background else RD_avg
+    rd = np.clip(rd_sub, 0, None)
+    return rd
 
-    range_profile = np.mean(range_fft, axis=1)
 
-    angle_fft = np.fft.fft(range_profile, n=256, axis=0)  # (n_angle_bins, 128)
-    angle_fft = np.fft.fftshift(angle_fft, axes=0)
+def tracking_and_clustering(save_path, start_frame, end_frame):
+    snr_per_distances_db = defaultdict(list)
+    rcs_per_distances = defaultdict(list)
+    # To be changed according to the object we want to track.
+    # Micro-Doppler signatures of pedestrians are typically weaker than those of vehicles.
+    cfar_fonction = CA_CFAR(win_param=(15,20,9,10), threshold=12, rd_size=(256, 256))
+    
+    # eps : The maximum distance between two samples for one to be considered as in the neighborhood of the other.
+    # min_samples : The number of samples (or total weight) in a neighborhood for a point to be considered as a core point. This includes the point itself.
+    dbscan = DBSCAN(eps=2, min_samples=3)
+    track_snr = Tracking()
+    track_rcs = Tracking()
 
-    ra_map = 20 * np.log10(np.abs(angle_fft) + 1e-6)
+    fig, (ax_rd, ax_pc_snr, ax_pc_rcs) = plt.subplots(1, 3, figsize=(18, 6))
+    plt.ion()
+    plt.show()
 
-    k = np.arange(256) - 128
-    sin_theta = np.clip(2 * k / 256, -1, 1)
-    angles_deg = np.degrees(np.arcsin(sin_theta))
+    p_noise = 10 ** (82.03/10)
+    
+    for i in range(start_frame, end_frame):
+        print(f"Processing frame {i}/{len(raw_files)}")
+        rd_power = compute_rd_power(raw_files[i], without_background=True)
+        rd_power_wi = compute_rd_power(raw_files[i], without_background=False)
 
-    return ra_map, angles_deg, range_bins[:128]
+        peaks = cfar_fonction(rd_power)
+
+        detected_bins = np.where(peaks > 0)
+        dbscan.fit(np.array(detected_bins).T)
+        labels = dbscan.labels_
+        # peak_met : metric to compute value of the cluster, can be "mean" or "max"
+        clusters = track_snr.extract_clusters(detected_bins, labels, rd_power_wi, peak_met="mean")
+        clusters_rcs = track_rcs.extract_clusters(detected_bins, labels, rd_power_wi, peak_met="max")
+
+        track_snr.step(clusters)
+        track_rcs.step(clusters_rcs)
+        display_clusters(fig, ax_rd, ax_pc_snr, ax_pc_rcs, i, rd_power, peaks, clusters, clusters_rcs)
+    
+    snr(save_path, snr_per_distances_db, track_snr, p_noise)
+    rcs(save_path, rcs_per_distances, track_rcs, p_noise)
+
+def snr(save_path, snr_per_distances_db, track_snr, p_noise):
+    tracks_snr = track_snr.get_confirmed_tracks()
+    # Can have multiple tracks, we need to identify the one corresponding to our object of interest. 
+    # I didn't find a good way to do it, I manually checking whether it was the one with the most hits, but also the one that moved over time.
+    best_track = tracks_snr[1]
+    for hist in best_track.power_history:
+        bin = list(hist.keys())[0]
+        bin_corrected = int(np.clip(round(bin), 0, N - 1))
+        dist_m = range_bins[bin_corrected]
+        p = list(hist.values())[0]
+        power_u = p - p_noise
+        snr = power_u / p_noise
+        snr_db = 10 * np.log10(snr)
+        snr_per_distances_db[dist_m].append(snr_db)
+    np.save(f"{save_path}/snr.npy", snr_per_distances_db)
+
+def rcs(save_path,rcs_per_distances, track_rcs, p_noise):
+    tracks_rcs = track_rcs.get_confirmed_tracks()
+    best_track = tracks_rcs[1]
+    for hist in best_track.power_history:
+        bin = list(hist.keys())[0]
+        bin_corrected = int(np.clip(round(bin), 0, N - 1))
+        dist_m = range_bins[bin_corrected]
+        p = list(hist.values())[0] 
+        power_u = p - p_noise
+        rcs_per_distances[dist_m].append(power_u)
+    np.save(f"{save_path}/rcs.npy", rcs_per_distances)
+
+def plot_rcs_snr(snr_threshold_db=17.0, max_distance=40.0, title="RCS & SNR vs Distance"):
+    P_NOISE = 10 ** (82.03/10)
+    P_SPHERE_LINEAR = 10 ** (135.1 / 10) - P_NOISE 
+    SIGMA_SPHERE    = 0.09 * np.pi
+    R_SPHERE        = 2.0
+
+    K = SIGMA_SPHERE / (P_SPHERE_LINEAR * (R_SPHERE ** 4))
+
+    snr_per_distances_db = np.load(f"{save_path}/snr.npy", allow_pickle=True).item()
+    rcs_per_distances    = np.load(f"{save_path}/rcs.npy", allow_pickle=True).item()
+
+    distances  = []
+    snr_median = []
+    rcs_values = []
+
+    for dist, snr_list in sorted(snr_per_distances_db.items()):
+        if len(snr_list) == 0 or dist not in rcs_per_distances:
+            continue
+        distances.append(dist)
+        snr_median.append(np.median(snr_list))
+        power_median = np.median(rcs_per_distances[dist])
+        rcs_values.append(K * power_median * (dist ** 4))
+
+    distances  = np.array(distances)
+    snr_median = np.array(snr_median)
+    rcs_values = np.array(rcs_values)
+
+    snr_at_distances = np.interp(distances, distances, snr_median)
+    mask_reliable    = (snr_at_distances >= snr_threshold_db) & (distances <= max_distance)
+    rcs_mean         = np.mean(rcs_values[mask_reliable])
+    print(f"Mean RCS (SNR ≥ {snr_threshold_db} dB) & (Distance ≤ {max_distance} m) : {rcs_mean:.4f} m²  ({10*np.log10(rcs_mean):.1f} dBsm)")
+
+
+    fig, ax1 = plt.subplots(figsize=(12, 5))
+    ax2 = ax1.twinx()
+
+    ax1.plot(distances, snr_median, 'r-', lw=2, label='SNR')
+    ax2.plot(distances, rcs_values, 'g-', lw=2, label='RCS')
+
+    ax1.set_xlabel('Distance (m)')
+    ax1.set_ylabel('SNR (dB)', color='r')
+    ax2.set_ylabel('RCS (m²)', color='g')
+    ax1.tick_params(axis='y', labelcolor='r')
+    ax2.tick_params(axis='y', labelcolor='g')
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper center')
+
+    ax1.set_title(title)
+    ax1.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(f"{save_path}/snr_rcs.png")
+    plt.show()
+
+
+
+def display_clusters(fig, ax_rd, ax_pc_snr, ax_pc_rcs, i, rd_power, peaks, clusters_snr, clusters_rcs):
+    ax_rd.clear()
+    ax_pc_snr.clear()
+    ax_pc_rcs.clear()
+
+    ax_rd.imshow(
+        10 * np.log10(rd_power).T,
+        extent=[velocity_bins[0], velocity_bins[-1], range_bins[0], range_bins[-1]],
+        origin="lower",
+        cmap="gray_r",
+        aspect="auto",
+        vmin=0, vmax=30
+    )
+
+    ax_pc_snr.imshow(
+        peaks.T,
+        extent=[velocity_bins[0], velocity_bins[-1], range_bins[0], range_bins[-1]],
+        origin="lower",
+        cmap="gray_r",
+        aspect="auto",
+        vmin=0, vmax=1
+    )
+
+    ax_pc_rcs.imshow(
+        peaks.T,
+        extent=[velocity_bins[0], velocity_bins[-1], range_bins[0], range_bins[-1]],
+        origin="lower",
+        cmap="gray_r",
+        aspect="auto",
+        vmin=0, vmax=1
+    )
+
+    cmap = plt.get_cmap("tab20")
+
+    render_clusters(ax_pc_snr, i, clusters_snr, cmap, title="SNR")
+    render_clusters(ax_pc_rcs, i, clusters_rcs, cmap, title="RCS")
+
+    ax_rd.set_xlim(velocity_bins[0], velocity_bins[-1])
+    ax_rd.set_ylim(range_bins[0], range_bins[-1])
+    ax_rd.set_xlabel("Velocity (km/h)")
+    ax_rd.set_ylabel("Range (m)")
+    ax_rd.set_title(f"RD frame {i}")
+
+
+    fig.canvas.draw_idle()
+    fig.canvas.flush_events()
+    plt.pause(0.01)
+
+def render_clusters(ax_pc, i, clusters, cmap, title="SNR"):
+    for c in clusters:
+        track_id = c.get("track_id", -1)
+        color = cmap(track_id % cmap.N) if track_id >= 0 else "red"
+
+        # Afficher tous les bins du cluster
+        if "points" in c:
+            for (d_bin, r_bin) in c["points"]:
+                d_bin = int(np.clip(round(d_bin), 0, N - 1))
+                r_bin = int(np.clip(round(r_bin), 0, N - 1))
+                ax_pc.scatter(
+                    velocity_bins[d_bin], range_bins[r_bin],
+                    c=[color], s=5, marker="s", alpha=0.6
+                )
+
+        # Afficher le centroïde par dessus avec un X plus grand
+        r_bin, d_bin = c["centroid"]
+        d_bin = int(np.clip(round(d_bin), 0, N - 1))
+        r_bin = int(np.clip(round(r_bin), 0, N - 1))
+        ax_pc.scatter(
+            velocity_bins[d_bin], range_bins[r_bin],
+            c=[color], s=80, marker="x", linewidths=2
+        )
+    ax_pc.set_xlim(velocity_bins[0], velocity_bins[-1])
+    ax_pc.set_ylim(range_bins[0], range_bins[-1])
+    ax_pc.set_xlabel("Velocity (km/h)")
+    ax_pc.set_ylabel("Range (m)")
+    ax_pc.set_title(f"Clusters frame - {title} {i}")
+
+
 
 # ==========================================
 # REAL-TIME VIEWER
@@ -137,59 +322,22 @@ def compute_ra(file):
 class RealTimeViewer:
     def __init__(self):
         self.paused = False
+        self.fig, (self.ax_rd, self.ax_cam) = plt.subplots(1, 2, figsize=(12, 6))
 
-        self.fig = plt.figure(figsize=(16, 8))
-        gs = self.fig.add_gridspec(3, 2, width_ratios=[2, 1], hspace=0.4, wspace=0.3)
-
-        # Radar RD — colonne gauche entière
-        self.ax_rd = self.fig.add_subplot(gs[:, 0])
-
-        #Caméra — haut droite
-        self.ax_cam = self.fig.add_subplot(gs[:, 1])
-
-        # self.ax_pc = self.fig.add_subplot(gs[:, 0])
-
-        # ADC — 3 lignes droite
-        # self.ax_adc = [self.fig.add_subplot(gs[rx, 1]) for rx in range(3)]
-
-        # Init flags
-        self.im_rd  = None
-        self.im_adc = None
+        self.im_rd = None
         self.im_cam = None
-        self.im_pc  = None
-        self.cbar   = None
-        self.adc_lines = []
-
-        # ── Radar RD axes ──────────────────────────────────────────────
+        self.cbar = None
         self.title_rd = self.ax_rd.set_title("")
+
+        # FIX AXES
         self.ax_rd.set_xlim(velocity_bins[0], velocity_bins[-1])
         self.ax_rd.set_ylim(range_bins[0], range_bins[-1])
         self.ax_rd.set_xlabel("Velocity (km/h)")
         self.ax_rd.set_ylabel("Range (m)")
-        
-        # self.title_pc = self.ax_pc.set_title("")
-        # self.ax_pc.set_xlim(velocity_bins[0], velocity_bins[-1])
-        # self.ax_pc.set_ylim(range_bins[0], range_bins[-1])
-        # self.ax_pc.set_xlabel("Velocity (km/h)")
-        # self.ax_pc.set_ylabel("Range (m)")
-        # self.cfar_fonction = CA_CFAR(win_param=(30,14,10,5), threshold=12, rd_size=(256, 256))
 
-
-        # ── Caméra ─────────────────────────────────────────────────────
         self.ax_cam.axis("off")
 
-        # ── ADC axes ───────────────────────────────────────────────────
-        # colors = ['blue', 'red', 'green']
-        # for rx in range(3):
-        #     self.ax_adc[rx].set_ylabel(f"RX {rx}")
-        #     self.ax_adc[rx].grid(True)
-        #     self.ax_adc[rx].set_ylim(32000, 33500)
-        #     if rx == 0:
-        #         self.ax_adc[rx].set_title("ADC signal (I / Q)")
-        #     if rx == 2:
-        #         self.ax_adc[rx].set_xlabel("Sample index")
-
-        # ── Key press ──────────────────────────────────────────────────
+        # KEY PRESS
         self.fig.canvas.mpl_connect('key_press_event', self.on_key)
 
         plt.ion()
@@ -208,137 +356,68 @@ class RealTimeViewer:
         raw_file = raw_files[i]
         t = raw_times[i]
 
-        # ── Lecture unique du fichier ───────────────────────────────────
-        # adc = get_complex_content(raw_file)
-        rd  = compute_rd(raw_file)
-        # peaks = self.cfar_fonction(rd).astype(bool)    
+        # ================= RADAR =================
+        rd_power = compute_rd_power(raw_file, without_background=True)
+        rd_db = 10 * np.log10(rd_power)
 
-
-        # ================= RADAR RD =================
         if self.im_rd is None:
             self.im_rd = self.ax_rd.imshow(
-                rd.T,
+                rd_db.T,
                 extent=[velocity_bins[0], velocity_bins[-1], range_bins[0], range_bins[-1]],
                 origin='lower',
                 cmap='gray_r',
                 vmin=0,
-                vmax=30,
                 aspect='auto'
             )
             self.cbar = self.fig.colorbar(self.im_rd, ax=self.ax_rd)
             self.cbar.set_label("dB")
         else:
-            self.im_rd.set_data(rd.T)
+            self.im_rd.set_data(rd_db.T)
 
         self.title_rd.set_text(f"Radar t = {t:.6f}")
 
-        # if self.im_pc is None:
-        #     self.im_pc = self.ax_pc.imshow(
-        #         peaks.T,
-        #         extent=[velocity_bins[0], velocity_bins[-1], range_bins[0], range_bins[-1]],
-        #         origin='lower',
-        #         cmap='gray_r',
-        #         vmin=0,
-        #         vmax=1,
-        #         aspect='auto'
-        #     )
-        #     self.cbar_pc = self.fig.colorbar(self.im_pc, ax=self.ax_pc)
-        #     self.cbar_pc.set_label("Hit")
-        # else:
-        #     self.im_pc.set_data(peaks.T)
-
-        # self.title_pc.set_text(f"Radar t = {t:.6f}")
-
-        # ================= ADC =================
-        # colors = ['blue', 'red', 'green']
-
-        # if self.im_adc is None:
-        #     for rx in range(3):
-        #         chirp0 = adc[rx, 1, :]
-        #         li, = self.ax_adc[rx].plot(
-        #             np.real(chirp0), color=colors[rx],
-        #             linewidth=0.8, label='I'
-        #         )
-        #         lq, = self.ax_adc[rx].plot(
-        #             np.imag(chirp0), color=colors[rx],
-        #             linewidth=0.8, linestyle='--', alpha=0.5, label='Q'
-        #         )
-        #         self.ax_adc[rx].legend(loc='upper right', fontsize=7)
-        #         self.adc_lines.append((li, lq))
-        #     self.im_adc = True
-
-        # else:
-        #     for rx in range(3):
-        #         chirp0 = adc[rx, 0, :]
-        #         self.adc_lines[rx][0].set_ydata(np.real(chirp0))
-        #         self.adc_lines[rx][1].set_ydata(np.imag(chirp0))
-
-        # self.ax_adc[0].set_title(f"ADC t = {t:.6f}")
-
         # ================= CAMERA =================
-        # idx = find_closest_index(cam_times, t)
-        # img = np.array(Image.open(cam_files[idx]))
+        idx = find_closest_index(cam_times, t)
+        img = np.array(Image.open(cam_files[idx]))
 
-        # if self.im_cam is None:
-        #     self.im_cam = self.ax_cam.imshow(img)
-        # else:
-        #     self.im_cam.set_data(img)
+        if self.im_cam is None:
+            self.im_cam = self.ax_cam.imshow(img)
+        else:
+            self.im_cam.set_data(img)
 
-        # self.ax_cam.set_title(f"Camera t = {cam_times[idx]:.6f}")
+        self.ax_cam.set_title(f"Camera t = {cam_times[idx]:.6f}")
 
-        # ── Refresh ────────────────────────────────────────────────────
-        self.fig.canvas.draw()
+        # refresh rapide
+        self.fig.canvas.draw_idle()
         self.fig.canvas.flush_events()
 
+        # pause si demandé
         while self.paused:
             plt.pause(0.05)
 
 # ==========================================
 # MAIN
 # ==========================================
-def compute_bg_power(raw_files_bg):
-    """
-    Calcule la puissance moyenne du background sur des frames anéchoïques.
-    """
-    accum = 0
-    for f in raw_files_bg:
-        content = get_complex_content(f)
-        rd = np.stack([FFT_RD(content[i]) for i in range(3)], axis=2)
-        power = np.abs(rd) ** 2
-        accum = power if accum is None else accum + power
-    return accum / len(raw_files_bg)
-
 def main():
-    viewer = RealTimeViewer()
-    writer = FFMpegWriter(fps=15)
+    # viewer = RealTimeViewer()
+    # writer = FFMpegWriter(fps=15)
 
-    with writer.saving(viewer.fig, output_video, dpi=200):
-        for i in range(len(raw_files)):
-            viewer.update(i)
-            if save_video:
-                writer.grab_frame()
+    # with writer.saving(viewer.fig, output_video, dpi=200):
+    #     for i in range(100, len(raw_files)):
+    #         print(f"Processing frame {i}/{len(raw_files)}")
+    #         viewer.update(i)
+    #         if save_video:
+    #             writer.grab_frame()
 
-            plt.pause(0.001)
+    #         plt.pause(0.001)
 
-    plt.ioff()
-    plt.show()
-    print("Video saved:", output_video)
-    # for i in range(len(raw_files)):
-    #     print(f"Processing file {i+1}/{len(raw_files)}")
-    #     rd = compute_rd(raw_files[i])
-    #     np.save(f"{save_path}/rd_{raw_files[i].stem}.npy", rd)
-    # contents = []
-    # for i in range(len(raw_files)):
-    #     print(f"Processing file {i}/{len(raw_files)}")
-    #     content = get_complex_content(raw_files[i])
-    #     contents.append(content)
-    # bg_array = np.mean(contents, axis=0)
-    # print(bg_array.dtype)
-    # np.save(f"{data_path}/background_70_80_raw.npy", bg_array)
-    # raw_files_bg, _ = load_files(Path(f"{data_path}/data_70_80/raw"), ".raw")
-    # np.save(f"{data_path}/background_puissance.npy", compute_bg_power(raw_files_bg))
+    # plt.ioff()
+    # plt.show()
+    # print("Video saved:", output_video)
 
-
+    tracking_and_clustering(save_path, start_frame=100, end_frame=600)
+    # plot_rcs_snr()
+    
 if __name__ == "__main__":
     main()
 

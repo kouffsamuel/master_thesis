@@ -1,4 +1,12 @@
 import numpy as np
+
+"""
+This file contains the encoder and decoder classes for the radar data.
+The ra_encoder class is responsible for encoding the radar data into a format suitable for input into the model, and decoding the model's output back into radar coordinates. 
+The rd_encoder class is similar but is designed for range-doppler data instead of range-azimuth data. 
+rd_encoder is not used for a training a model in this thesis. 
+Taken from FFTRadNet codebase, with modifications for the specific needs of this thesis.
+"""
         
 class ra_encoder():
     def __init__(self, geometry, statistics,regression_layer = 2):

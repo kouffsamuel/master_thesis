@@ -13,6 +13,12 @@ import math
 
 CLASS_TO_ID = {'car':0,'truck':1,'bicycle':2,'bus':3, 'person':4}
 
+"""
+Dataset class for the RADIal dataset. 
+This class is responsible for loading the radar data, segmentation maps, labels, and images for each sample in the dataset.
+Taken from FFTRadNet codebase, with modifications for the specific needs of this thesis.
+"""
+
 
 class RADIal(Dataset):
 
@@ -41,6 +47,9 @@ class RADIal(Dataset):
             ids_filters = np.unique(np.concatenate(ids_filters))
             self.labels = self.labels[ids_filters]
 
+        # In case we only want hard cases, we can use the following code instead. 
+        # Otherwise it will be the entire dataset (both easy and hard cases)
+        
         # if(difficult==True):
         #     ids_filters=[]
         #     ids = np.where( self.labels[:, 16] == 1)[0]
