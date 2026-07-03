@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react'
 import './TopBar.css'
 
 export default function TopBar({
-  onOpen, frameIdx, frameTotal, frameData, onPrev, onNext, onJump, labeled
+  onOpen, jsonFiles = [], activeJsonFile = '', onJsonFileChange,
+  isDirty = false,
+  frameIdx, frameTotal, frameData, onPrev, onNext, onJump, labeled
 }) {
   const [jumpVal, setJumpVal] = useState('')
 
@@ -22,6 +24,21 @@ export default function TopBar({
     <div className="topbar">
       <span className="topbar-title">MUSE Labeling Tool</span>
       <button className="tb-btn" onClick={onOpen}>📂 Open Folder</button>
+
+      {jsonFiles.length > 0 && (
+        <select
+          className="json-select"
+          value={activeJsonFile}
+          onChange={e => onJsonFileChange(e.target.value)}
+          title="Open a JSON file from the selected data folder"
+        >
+          {jsonFiles.map(file => (
+            <option key={file.name} value={file.name}>
+              {file.name}
+            </option>
+          ))}
+        </select>
+      )}
 
       <div className="frame-nav">
         <button className="tb-btn" onClick={onPrev} disabled={!frameTotal || frameIdx === 0}>◀</button>
@@ -45,6 +62,7 @@ export default function TopBar({
       {frameTotal > 0 && (
         <span className="progress-label">Labeled: {labeled} / {frameTotal}</span>
       )}
+      {isDirty && <span className="dirty-label">Unsaved</span>}
     </div>
   )
 }

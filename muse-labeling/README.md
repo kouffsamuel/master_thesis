@@ -13,6 +13,98 @@ npm run build
 npm run dev
 ```
 
+For local labeling, keep `npm run dev` running and open the Vite URL it prints
+(usually `http://localhost:5173`). `npm run build` only creates the production
+files in `dist/`; it does not start the labeling tool.
+
+## Opening Data
+
+1. Click **Open Folder**.
+2. Select the exported data folder, for example:
+
+   ```text
+   /Users/aurora/Desktop/my_output_frames_day_1
+   ```
+
+3. If the folder contains multiple labeling JSON files, use the top-bar JSON
+   dropdown to choose which one to open.
+
+The selected folder must contain the image/radar assets used by the JSON:
+
+```text
+yolo_tracking_data.json
+camera/
+rd_raw/
+```
+
+For split/chunk JSON files, keep them in the same folder as `camera/` and
+`rd_raw/`. The tool reuses those folders; it does not need copied images.
+
+## Large JSON Files
+
+Chrome should not load multi-GB labeling JSON files in one shot. The frontend
+will refuse to auto-load a JSON file larger than 400MB and will ask you to pick
+a smaller split JSON instead.
+
+If `yolo_tracking_data.json` is very large, split it into smaller JSON chunks in
+the same exported data folder:
+
+```bash
+python split_label_json.py /Users/aurora/Desktop/my_output_frames_day_1/yolo_tracking_data.json \
+  --frames-per-file 500
+```
+
+This writes files such as:
+
+```text
+yolo_tracking_data_00000_00499.json
+yolo_tracking_data_00500_00999.json
+```
+
+For `my_output_frames_day_1`, the current chunk set is:
+
+```text
+yolo_tracking_data_00000_00499.json
+yolo_tracking_data_00500_00999.json
+yolo_tracking_data_01000_01499.json
+yolo_tracking_data_01500_01999.json
+yolo_tracking_data_02000_02499.json
+yolo_tracking_data_02500_02999.json
+yolo_tracking_data_03000_03499.json
+yolo_tracking_data_03500_03999.json
+yolo_tracking_data_04000_04147.json
+```
+
+After opening the folder, choose one chunk from the dropdown. **Save** writes
+back to the currently selected JSON chunk, not to the original multi-GB
+`yolo_tracking_data.json`. If there are unsaved changes and you switch chunks,
+the tool asks for confirmation first.
+
+### File access troubleshooting
+
+If Chrome shows:
+
+```text
+The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.
+```
+
+re-click **Open Folder** and select the exported data folder again. This usually
+means Chrome had a folder/file handle, but macOS or the browser could no longer
+read the underlying files. Common fixes:
+
+- Use Chrome or Edge on `localhost` / HTTPS; Safari and Firefox do not fully
+  support the File System Access API used by this tool.
+- Select the run folder that directly contains `yolo_tracking_data.json`,
+  `camera/`, and `rd_raw/`.
+- Do not move, rename, delete, or cloud-sync the selected folder while the tool
+  is loading it.
+- On macOS, allow Chrome access to Desktop/Documents/Downloads if the data lives
+  there: **System Settings → Privacy & Security → Files and Folders**. If that
+  still fails, grant Chrome **Full Disk Access** or move the data folder to a
+  non-protected local directory.
+- If the page was refreshed or reopened, select the folder again; browser file
+  handles are not reliable across sessions for this workflow.
+
 ## Docker Deploy
 
 ```bash
@@ -211,16 +303,17 @@ other image folders are rendered references for eyeballing.
 ## Usage
 
 1. Click **Open Folder** and select your `my_output_frames/` directory.
-2. **← →** to navigate frames; type a number in the top bar and Enter to jump.
-3. **Camera:** drag to draw a new box, click to select, drag corners to resize,
+2. If a JSON dropdown appears in the top bar, choose the chunk/file to label.
+3. **← →** to navigate frames; type a number in the top bar and Enter to jump.
+4. **Camera:** drag to draw a new box, click to select, drag corners to resize,
    edit coordinates/type in the panel, **Del** to delete, **Restore original
    YOLO box** to undo edits back to the detector output.
-4. **Radar:** click a centroid (✕) to select, then toggle Object / Pair / Noise
+5. **Radar:** click a centroid (✕) to select, then toggle Object / Pair / Noise
    in the panel.
    - **Object** asks you to click the matching camera box (or "object with no box").
    - **Pair** asks you to click the partner point.
    - **Esc** cancels a pending pair/box selection.
-5. **Ctrl+S** to save · **Ctrl+Z / Ctrl+Shift+Z** to undo/redo.
+6. **Ctrl+S** to save · **Ctrl+Z / Ctrl+Shift+Z** to undo/redo.
 
 ## Batch pre-labeling (optional)
 
