@@ -312,7 +312,8 @@ other image folders are rendered references for eyeballing.
 
 1. Click **Open Folder** and select your `my_output_frames/` directory.
 2. If a JSON dropdown appears in the top bar, choose the chunk/file to label.
-3. **← →** to navigate frames; type a number in the top bar and Enter to jump.
+3. **← →** to navigate frames (**Shift+← →** jumps 10 frames); type a number in
+   the top bar and Enter to jump.
 4. **Camera:** drag to draw a new box, click to select, drag corners to resize,
    edit coordinates/type in the panel, **Del** to delete, **Restore original
    YOLO box** to undo edits back to the detector output.

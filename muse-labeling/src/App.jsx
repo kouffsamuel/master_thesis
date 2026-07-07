@@ -299,8 +299,8 @@ export default function App() {
       if (['INPUT', 'SELECT'].includes(e.target.tagName)) return
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); redo(); return }
       if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return }
-      if (e.key === 'ArrowLeft')  gotoFrame(frameIdx - 1)
-      if (e.key === 'ArrowRight') gotoFrame(frameIdx + 1)
+      if (e.key === 'ArrowLeft')  gotoFrame(frameIdx - (e.shiftKey ? 10 : 1))
+      if (e.key === 'ArrowRight') gotoFrame(frameIdx + (e.shiftKey ? 10 : 1))
       if (e.key === 'Escape') { setPairPendingFor(-1); setBoxLinkPendingFor(-1) }
       if (e.key === 'Delete' && selectedBox >= 0) {
         pushHistory()
