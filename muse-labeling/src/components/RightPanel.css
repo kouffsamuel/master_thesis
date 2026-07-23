@@ -215,3 +215,16 @@ kbd {
 
 .log-line { white-space: pre-wrap; word-break: break-all; }
 .log-empty { color: #333; font-style: italic; }
+.auto-label-btn {
+  width: 100%;
+  padding: 7px;
+  margin-bottom: 6px;
+  background: transparent;
+  border: 1px solid #7d5fb2;
+  border-radius: 4px;
+  color: #b08fe8;
+  cursor: pointer;
+  font-size: 12px;
+}
+.auto-label-btn:hover:not(:disabled) { background: #2a1f3d; }
+.auto-label-btn:disabled { opacity: 0.4; cursor: default; }

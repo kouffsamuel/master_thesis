@@ -1,0 +1,19 @@
+{
+  "stage1": {
+    "noiseRegion": {
+      "rangeM": [54.0, 56.0],
+      "velocityKmh": [10.0, 13.0]
+    },
+    "energyHiDb": 110.0
+  },
+  "stage2": {
+    "epsV": 4.0,
+    "epsR": 5.0,
+    "sumC": 69.3,
+    "lambda": 0.5
+  },
+  "stage3": {
+    "thetaS": 0.5,
+    "smoothWindowK": 5
+  }
+}

@@ -13,6 +13,7 @@ import {
   isObject, isNoise, getPartner, isPaired, getObjectBox,
   toggleObject, toggleNoise, linkPair, unlinkPair, clearRadar
 } from './utils/labeling'
+import { autoLabelFrame } from './utils/autoLabel'
 import './App.css'
 
 function frameIndexFromKey(key) {
@@ -20,47 +21,12 @@ function frameIndexFromKey(key) {
   return m ? parseInt(m[1], 10) : 0
 }
 
-function fileAccessErrorMessage(error) {
-  if (error?.name === 'NotReadableError') {
-    return [
-      'Chrome could not read the selected data folder.',
-      'Re-open the folder, make sure it was not moved or synced while loading,',
-      'and grant Chrome access to Desktop/Documents in macOS Privacy settings if needed.'
-    ].join(' ')
-  }
-  if (error?.name === 'NotAllowedError') {
-    return 'Folder access was not allowed. Re-open the folder and approve read/write access.'
-  }
-  return error?.message || 'Unknown file access error'
-}
-
-const MAX_AUTO_LOAD_BYTES = 400 * 1024 * 1024
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return ''
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit += 1
-  }
-  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
-}
-
-function isLabelJsonName(name) {
-  return /(^|_)yolo_tracking_data.*\.json(\.bak)?$/i.test(name)
-}
-
 export default function App() {
   // jsonData is the ONLY source of truth. Everything shown is derived from it.
   const [dirHandle, setDirHandle] = useState(null)
-  const [jsonFiles, setJsonFiles] = useState([])
-  const [activeJsonFile, setActiveJsonFile] = useState('')
   const [jsonData,  setJsonData]  = useState({})
   const [frameKeys, setFrameKeys] = useState([])
   const [frameIdx,  setFrameIdx]  = useState(0)
-  const [isDirty, setIsDirty] = useState(false)
 
   const [selectedBox,     setSelectedBox]     = useState(-1)
   const [selectedRadar,   setSelectedRadar]   = useState(-1)   // index into radar_detections
@@ -73,6 +39,12 @@ export default function App() {
   // const [cameraURL, setCameraURL] = useState('')
   const [toast,     setToast]     = useState(null)
   const [logs,       setLogs]     = useState([])
+  // Display-only camera brightness (1 = original). Lives outside jsonData
+  // and the undo system on purpose — it never modifies any data.
+  const [brightness, setBrightness] = useState(1)
+  // Algorithm suggestions (Stage 3): display-only, never persisted to JSON.
+  // { candidates: [trackId], needsReview: bool } | null
+  const [suggestions, setSuggestions] = useState(null)
 
   const [history,   setHistory]   = useState([])
   const [redoStack, setRedoStack] = useState([])
@@ -109,20 +81,16 @@ export default function App() {
 
   // ── Mutators that write into the current frame ─────────────────────────
   const patchFrame = (patch) => {
-    const key = frameKeys[frameIdx]
-    if (!key) return
-    setIsDirty(true)
     setJsonData(prev => {
+      const key = frameKeys[frameIdx]
       if (!key || !prev[key]) return prev
       return { ...prev, [key]: { ...prev[key], ...patch } }
     })
   }
 
   const setBoxes = (updater) => {
-    const key = frameKeys[frameIdx]
-    if (!key) return
-    setIsDirty(true)
     setJsonData(prev => {
+      const key = frameKeys[frameIdx]
       if (!key || !prev[key]) return prev
       const frame = prev[key]
       const prevBoxes = frame.box_detections || []
@@ -133,108 +101,22 @@ export default function App() {
 
   const setLabeling = (newLabeling) => patchFrame({ labeling: newLabeling })
 
-  const clearDataset = () => {
-    setJsonData({})
-    setFrameKeys([])
-    setFrameIdx(0)
-    setHistory([])
-    setRedoStack([])
-    setSelectedBox(-1)
-    setSelectedRadar(-1)
-    setPairPendingFor(-1)
-    setBoxLinkPendingFor(-1)
-    setRdData(null)
-    setCameraURL('')
-    setIsDirty(false)
-  }
-
-  const listJsonFiles = async (dh) => {
-    const files = []
-    for await (const [name, handle] of dh.entries()) {
-      if (handle.kind !== 'file' || !isLabelJsonName(name)) continue
-      const file = await handle.getFile()
-      files.push({ name, size: file.size })
-    }
-    return files.sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  const loadJsonFile = useCallback(async (fileName, handle = dirHandle) => {
-    if (!handle || !fileName) return
-    if (isDirty && fileName !== activeJsonFile && !window.confirm('Discard unsaved changes and open another JSON file?')) {
-      return
-    }
+  // ── Open folder ─────────────────────────────────────────────────────────
+  const openFolder = async () => {
     try {
-      const jh = await handle.getFileHandle(fileName)
+      const dh = await window.showDirectoryPicker({ mode: 'readwrite' })
+      const jh = await dh.getFileHandle('yolo_tracking_data.json')
       const jf = await jh.getFile()
-      if (jf.size > MAX_AUTO_LOAD_BYTES) {
-        clearDataset()
-        setActiveJsonFile(fileName)
-        const msg = `${fileName} is ${formatBytes(jf.size)}, too large to load safely in Chrome. Split it into smaller JSON files first.`
-        showToast(msg, true)
-        addLog(`[Error] ${msg}`)
-        return
-      }
       const data = JSON.parse(await jf.text())
       const keys = Object.keys(data).sort()
+      setDirHandle(dh)
       setJsonData(data)
       setFrameKeys(keys)
       setFrameIdx(0)
-      setHistory([])
-      setRedoStack([])
-      setActiveJsonFile(fileName)
-      setIsDirty(false)
-      addLog(`[System] Opened ${fileName} — ${keys.length} frames found`)
+      setHistory([]); setRedoStack([])
+      addLog(`[System] Opened folder — ${keys.length} frames found`)
     } catch (e) {
-      if (e.name !== 'AbortError') {
-        const msg = fileAccessErrorMessage(e)
-        showToast('Error: ' + msg, true)
-        addLog(`[Error] ${msg}`)
-      }
-    }
-  }, [dirHandle, isDirty, activeJsonFile])
-
-  // ── Open folder ─────────────────────────────────────────────────────────
-  const openFolder = async () => {
-    if (isDirty && !window.confirm('Discard unsaved changes and open another folder?')) {
-      return
-    }
-    try {
-      const dh = await window.showDirectoryPicker({ mode: 'readwrite' })
-      if (dh.queryPermission && dh.requestPermission) {
-        const opts = { mode: 'readwrite' }
-        const permission = await dh.queryPermission(opts)
-        if (permission !== 'granted') {
-          const requested = await dh.requestPermission(opts)
-          if (requested !== 'granted') {
-            throw new DOMException('Folder read/write access was denied', 'NotAllowedError')
-          }
-        }
-      }
-      const files = await listJsonFiles(dh)
-      setDirHandle(dh)
-      setJsonFiles(files)
-      clearDataset()
-      addLog(`[System] Opened folder — ${files.length} JSON files found`)
-
-      const preferred = files.find(f => f.name === 'yolo_tracking_data.json') || files[0]
-      if (!preferred) {
-        showToast('No yolo_tracking_data JSON file found in this folder.', true)
-        return
-      }
-      if (preferred.size > MAX_AUTO_LOAD_BYTES) {
-        setActiveJsonFile(preferred.name)
-        const msg = `${preferred.name} is ${formatBytes(preferred.size)}. Choose a smaller split JSON file, or run split_label_json.py first.`
-        showToast(msg, true)
-        addLog(`[System] ${msg}`)
-        return
-      }
-      await loadJsonFile(preferred.name, dh)
-    } catch (e) {
-      if (e.name !== 'AbortError') {
-        const msg = fileAccessErrorMessage(e)
-        showToast('Error: ' + msg, true)
-        addLog(`[Error] ${msg}`)
-      }
+      if (e.name !== 'AbortError') showToast('Error: ' + e.message, true)
     }
   }
 
@@ -244,6 +126,7 @@ export default function App() {
     setSelectedRadar(-1)
     setPairPendingFor(-1)
     setBoxLinkPendingFor(-1)
+    setSuggestions(null)   // algorithm suggestions live per-frame only
   }, [frameIdx])
 
   // // ── Fetch images (independent of label edits) ──────────────────────────
@@ -273,34 +156,33 @@ export default function App() {
       }
       addLog(`[Frame ${fi}] Loaded`)
     })()
-  }, [frameIdx, dirHandle, frameKeys, jsonData])
+  }, [frameIdx, dirHandle, frameKeys])
 
   // ── Save ────────────────────────────────────────────────────────────────
   const save = useCallback(async () => {
-    if (!dirHandle || !activeJsonFile) return
+    if (!dirHandle) return
     try {
-      const fh = await dirHandle.getFileHandle(activeJsonFile, { create: true })
+      const fh = await dirHandle.getFileHandle('yolo_tracking_data.json', { create: true })
       const w  = await fh.createWritable()
       await w.write(JSON.stringify(jsonData, null, 2))
       await w.close()
-      setIsDirty(false)
-      showToast(`Saved ${activeJsonFile}`)
-      addLog(`[Save] ${activeJsonFile} written to disk`)
+      showToast('Saved')
+      addLog(`[Save] All frames written to disk`)
     } catch (e) {
       showToast('Save failed: ' + e.message, true)
       addLog(`[Error] Save failed: ${e.message}`)
     }
-  }, [dirHandle, activeJsonFile, jsonData])
+  }, [dirHandle, jsonData])
 
   // ── Keyboard ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
       if (e.ctrlKey && e.key === 's') { e.preventDefault(); save(); return }
-      if (['INPUT', 'SELECT'].includes(e.target.tagName)) return
+      if (e.target.tagName === 'INPUT') return
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); redo(); return }
       if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return }
-      if (e.key === 'ArrowLeft')  gotoFrame(frameIdx - (e.shiftKey ? 10 : 1))
-      if (e.key === 'ArrowRight') gotoFrame(frameIdx + (e.shiftKey ? 10 : 1))
+      if (e.key === 'ArrowLeft')  gotoFrame(frameIdx - 1)
+      if (e.key === 'ArrowRight') gotoFrame(frameIdx + 1)
       if (e.key === 'Escape') { setPairPendingFor(-1); setBoxLinkPendingFor(-1) }
       if (e.key === 'Delete' && selectedBox >= 0) {
         pushHistory()
@@ -430,6 +312,25 @@ export default function App() {
     addLog(`[Radar ${selRadarId}] all labels cleared`)
   }
 
+  // ── Auto-label: run the algorithm on the current frame ──────────────────
+  // ONE pushHistory + ONE setLabeling = one undo step. Ctrl+Z restores the
+  // entire pre-button state. The algorithm output replaces the frame's
+  // labeling wholesale (deterministic and idempotent).
+  const runAutoLabel = () => {
+    if (!frameData) return
+    pushHistory()
+    // labeling = decisions (noise + pairs) -> jsonData, one undo step.
+    // suggestions = Stage 3 hints -> display state only, never saved.
+    const { labeling: auto, suggestions: sug } = autoLabelFrame(frameData)
+    setLabeling(auto)
+    setSuggestions(sug)
+    addLog(
+      `[Auto] noise: ${auto.noise.length}, pairs: ${auto.pairs.length}, ` +
+      `candidates: ${sug.candidates.length}` +
+      (sug.needsReview ? ' — ⚠ sensors disagree, please review' : '')
+    )
+  }
+
   // ── Progress ─────────────────────────────────────────────────────────────
   const labeledCount = frameKeys.filter(k => {
     const l = jsonData[k]?.labeling
@@ -440,10 +341,6 @@ export default function App() {
     <div className="app">
       <TopBar
         onOpen={openFolder}
-        jsonFiles={jsonFiles}
-        activeJsonFile={activeJsonFile}
-        onJsonFileChange={loadJsonFile}
-        isDirty={isDirty}
         frameIdx={frameIdx}
         frameTotal={frameKeys.length}
         frameData={frameData}
@@ -461,8 +358,22 @@ export default function App() {
         </div>
 
         <div className="cell cell-camera">
-          <div className="cell-title">
-            Camera{boxLinkPendingFor >= 0 ? ' — click a box to link as object (Esc to cancel)' : ' — draw or adjust boxes'}
+          <div className="cell-title" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+            <span>
+              Camera{boxLinkPendingFor >= 0 ? ' — click a box to link as object (Esc to cancel)' : ' — draw or adjust boxes'}
+            </span>
+            <span style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}
+                  title="Display-only brightness — does not modify the image or any data">
+              <span style={{ opacity:0.7 }}>☀</span>
+              <input
+                type="range" min="1" max="3" step="0.1"
+                value={brightness}
+                onChange={e => setBrightness(parseFloat(e.target.value))}
+                onDoubleClick={() => setBrightness(1)}
+                style={{ width: 90 }}
+              />
+              <span style={{ width: 34, textAlign:'right', opacity:0.7 }}>{brightness.toFixed(1)}×</span>
+            </span>
           </div>
           <div className="cell-body">
             <CameraCanvas
@@ -473,6 +384,7 @@ export default function App() {
               setSelectedBox={handleBoxClick}
               onBeforeEdit={pushHistory}
               linkMode={boxLinkPendingFor >= 0}
+              brightness={brightness}
             />
           </div>
         </div>
@@ -493,6 +405,8 @@ export default function App() {
             onNoise={actNoise}
             onPair={actPair}
             onClear={actClear}
+            onAutoLabel={runAutoLabel}
+            canAutoLabel={!!frameData}
             labelHelpers={{ isObject, isNoise, isPaired, getPartner, getObjectBox }}
             onSave={save}
             onBeforeEdit={pushHistory}
@@ -517,6 +431,7 @@ export default function App() {
               labeling={labeling}
               selectedRadar={selectedRadar}
               pairPendingFor={pairPendingFor}
+              candidates={suggestions?.candidates || []}
               onRadarClick={handleRadarClick}
               labelHelpers={{ isObject, isNoise, getPartner }}
             />

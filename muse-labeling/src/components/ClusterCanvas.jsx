@@ -31,6 +31,7 @@ function pairColorFor(radarId, partnerId) {
 
 export default function ClusterCanvas({
   radarDetections, labeling, selectedRadar, pairPendingFor,
+  candidates = [],   // Stage 3 nominations (display-only)
   onRadarClick, labelHelpers
 }) {
   const canvasRef = useRef(null)
@@ -121,6 +122,13 @@ export default function ClusterCanvas({
       }
 
       const outerMax = RING_BASE + RING_GAP
+      // Stage 3 candidate: dashed gold ring — a suggestion awaiting the
+      // human's object↔box link, visually distinct from decided labels.
+      if (candidates.includes(radarId)) {
+        ctx.strokeStyle = '#f0c419'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3])
+        ctx.beginPath(); ctx.arc(cx, cy, outerMax + 3, 0, Math.PI*2); ctx.stroke()
+        ctx.setLineDash([])
+      }
       if (isSel) {
         ctx.strokeStyle = '#e94560'; ctx.lineWidth = 2
         ctx.beginPath(); ctx.arc(cx, cy, outerMax+6, 0, Math.PI*2); ctx.stroke()
@@ -137,7 +145,7 @@ export default function ClusterCanvas({
         ctx.fillStyle = '#555'; ctx.fillText('unconfirmed', cx+outerMax+8, cy+13)
       }
     })
-  }, [radarDetections, labeling, selectedRadar, pairPendingFor, isObject, isNoise, getPartner])
+  }, [radarDetections, labeling, selectedRadar, pairPendingFor, candidates, isObject, isNoise, getPartner])
 
   useEffect(() => {
     const canvas = canvasRef.current

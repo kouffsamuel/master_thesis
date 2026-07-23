@@ -29,18 +29,6 @@
 .tb-btn:hover:not(:disabled) { background: #e94560; border-color: #e94560; }
 .tb-btn:disabled { opacity: 0.35; cursor: default; }
 
-.json-select {
-  max-width: 300px;
-  height: 27px;
-  background: #1a1a2e;
-  border: 1px solid #0f3460;
-  border-radius: 4px;
-  color: #e0e0e0;
-  font-size: 12px;
-  padding: 3px 8px;
-}
-.json-select:focus { outline: none; border-color: #e94560; }
-
 .frame-nav {
   display: flex;
   align-items: center;
@@ -79,9 +67,4 @@
 .progress-label {
   font-size: 11px;
   color: #666;
-}
-
-.dirty-label {
-  font-size: 11px;
-  color: #f2c94c;
 }

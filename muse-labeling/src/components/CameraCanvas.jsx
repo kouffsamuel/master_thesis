@@ -3,15 +3,18 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 const HANDLE_R = 6
 
 export default function CameraCanvas({
-  imageURL, boxes, setBoxes, selectedBox, setSelectedBox, onBeforeEdit, linkMode
+  imageURL, boxes, setBoxes, selectedBox, setSelectedBox, onBeforeEdit, linkMode,
+  brightness = 1
 }) {
   const canvasRef = useRef(null)
   const imgRef    = useRef(new Image())
   const stateRef  = useRef({ boxes, selectedBox })
+  const brightRef = useRef(1)   // display-only brightness; never touches image data
 
   const [drag, setDrag] = useState(null)
 
   useEffect(() => { stateRef.current = { boxes, selectedBox } }, [boxes, selectedBox])
+  useEffect(() => { brightRef.current = brightness }, [brightness])
 
   useEffect(() => {
     if (!imageURL) return
@@ -20,7 +23,7 @@ export default function CameraCanvas({
     img.src = imageURL
   }, [imageURL])
 
-  useEffect(() => { render() }, [boxes, selectedBox, drag])
+  useEffect(() => { render() }, [boxes, selectedBox, drag, brightness])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -151,7 +154,12 @@ export default function CameraCanvas({
     const img = imgRef.current
     if (img.naturalWidth) {
       const { scale, ox, oy } = getScale()
+      // Display-only brightness: filter wraps ONLY the photo draw call,
+      // so boxes/labels keep their exact colors. Image data is untouched.
+      const b = brightRef.current
+      if (b !== 1) ctx.filter = `brightness(${b})`
       ctx.drawImage(img, ox, oy, img.naturalWidth*scale, img.naturalHeight*scale)
+      ctx.filter = 'none'
     }
 
     const { boxes, selectedBox } = stateRef.current
