@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import './TopBar.css'
 
 export default function TopBar({
-  onOpen, frameIdx, frameTotal, frameData, onPrev, onNext, onJump, labeled
+  onOpen, frameIdx, frameTotal, frameData, onPrev, onNext, onJump, labeled,
+  theme, onToggleTheme
 }) {
   const [jumpVal, setJumpVal] = useState('')
 
@@ -22,6 +23,13 @@ export default function TopBar({
     <div className="topbar">
       <span className="topbar-title">MUSE Labeling Tool</span>
       <button className="tb-btn" onClick={onOpen}>📂 Open Folder</button>
+      <button
+        className="tb-btn theme-btn"
+        onClick={onToggleTheme}
+        title="Switch between light and dark mode"
+      >
+        {theme === 'light' ? '🌙 Dark' : '☀️ Light'}
+      </button>
 
       <div className="frame-nav">
         <button className="tb-btn" onClick={onPrev} disabled={!frameTotal || frameIdx === 0}>◀</button>

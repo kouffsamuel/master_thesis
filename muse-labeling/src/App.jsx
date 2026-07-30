@@ -14,11 +14,19 @@ import {
   toggleObject, toggleNoise, linkPair, unlinkPair, clearRadar
 } from './utils/labeling'
 import { autoLabelFrame } from './utils/autoLabel'
+import { loadTheme, saveTheme } from './utils/theme'
 import './App.css'
 
 function frameIndexFromKey(key) {
   const m = key?.match(/frame_(\d+)\.jpeg/)
   return m ? parseInt(m[1], 10) : 0
+}
+
+// A frame counts as labeled once it carries any decision at all.
+function hasLabels(l) {
+  return !!l && !!(
+    Object.keys(l.object || {}).length || (l.noise || []).length || (l.pairs || []).length
+  )
 }
 
 export default function App() {
@@ -45,9 +53,23 @@ export default function App() {
   // Algorithm suggestions (Stage 3): display-only, never persisted to JSON.
   // { candidates: [trackId], needsReview: bool } | null
   const [suggestions, setSuggestions] = useState(null)
+  // Switch: re-run Auto-label on every frame change. Session-only — it drives
+  // writes into jsonData, so it deliberately doesn't survive a reload.
+  const [autoLabelAlways, setAutoLabelAlways] = useState(false)
+  const autoAlwaysRef = useRef(autoLabelAlways)
+  useEffect(() => { autoAlwaysRef.current = autoLabelAlways }, [autoLabelAlways])
 
   const [history,   setHistory]   = useState([])
   const [redoStack, setRedoStack] = useState([])
+
+  // Display-only theme: drives the CSS variables via <html data-theme> and is
+  // passed to the canvases (they can't read CSS variables). Never touches data.
+  const [theme, setTheme] = useState(loadTheme)
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    saveTheme(theme)
+  }, [theme])
+  const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'))
 
   const addLog = (msg) => setLogs(prev => [...prev.slice(-99), msg])
 
@@ -316,8 +338,16 @@ export default function App() {
   // ONE pushHistory + ONE setLabeling = one undo step. Ctrl+Z restores the
   // entire pre-button state. The algorithm output replaces the frame's
   // labeling wholesale (deterministic and idempotent).
-  const runAutoLabel = () => {
+  // opts.skipIfLabeled — used by the auto-on-frame-change switch: the algorithm
+  // replaces a frame's labeling wholesale, so re-running it on a frame someone
+  // already corrected by hand would silently wipe that work just by navigating
+  // back to it. Explicit runs (button / switching the toggle on) always apply.
+  const runAutoLabel = (opts = {}) => {
     if (!frameData) return
+    if (opts.skipIfLabeled && hasLabels(frameData.labeling)) {
+      addLog(`[Auto] Frame ${frameData.frame_index} already labeled — skipped`)
+      return
+    }
     pushHistory()
     // labeling = decisions (noise + pairs) -> jsonData, one undo step.
     // suggestions = Stage 3 hints -> display state only, never saved.
@@ -331,11 +361,27 @@ export default function App() {
     )
   }
 
+  // Switch flip: turning it ON applies to the frame you're looking at right
+  // away (that run is explicit, so it overwrites even a labeled frame — one
+  // Ctrl+Z undoes it).
+  const toggleAutoLabelAlways = () => {
+    const next = !autoLabelAlways
+    setAutoLabelAlways(next)
+    addLog(`[Auto] auto-apply on frame change ${next ? 'ON' : 'OFF'}`)
+    if (next) runAutoLabel()
+  }
+
+  // Frame changed (or a folder was just opened) with the switch on.
+  // Declared after the selection-reset effect on purpose: effects fire in
+  // declaration order, so `suggestions` is cleared before this refills it.
+  useEffect(() => {
+    if (!autoAlwaysRef.current) return
+    runAutoLabel({ skipIfLabeled: true })
+
+  }, [frameIdx, frameKeys])
+
   // ── Progress ─────────────────────────────────────────────────────────────
-  const labeledCount = frameKeys.filter(k => {
-    const l = jsonData[k]?.labeling
-    return l && (Object.keys(l.object || {}).length || (l.noise || []).length || (l.pairs || []).length)
-  }).length
+  const labeledCount = frameKeys.filter(k => hasLabels(jsonData[k]?.labeling)).length
 
   return (
     <div className="app">
@@ -348,13 +394,15 @@ export default function App() {
         onNext={() => gotoFrame(frameIdx + 1)}
         onJump={gotoFrame}
         labeled={labeledCount}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       <div className="main-grid">
         <div className="cell cell-rd">
           <div className="cell-title">Range-Doppler Map</div>
           {/* <div className="cell-body"><StaticImage src={rdURL} alt="RD map" /></div> */}
-          <div className="cell-body"><RDMapCanvas data={rdData} /></div>
+          <div className="cell-body"><RDMapCanvas data={rdData} theme={theme} /></div>
         </div>
 
         <div className="cell cell-camera">
@@ -405,8 +453,10 @@ export default function App() {
             onNoise={actNoise}
             onPair={actPair}
             onClear={actClear}
-            onAutoLabel={runAutoLabel}
+            onAutoLabel={() => runAutoLabel()}
             canAutoLabel={!!frameData}
+            autoLabelAlways={autoLabelAlways}
+            onToggleAutoLabelAlways={toggleAutoLabelAlways}
             labelHelpers={{ isObject, isNoise, isPaired, getPartner, getObjectBox }}
             onSave={save}
             onBeforeEdit={pushHistory}
@@ -420,7 +470,7 @@ export default function App() {
 
         <div className="cell cell-track">
           <div className="cell-title">Track History</div>
-          <div className="cell-body"><TrackCanvas trackHistory={trackHistory} /></div>
+          <div className="cell-body"><TrackCanvas trackHistory={trackHistory} theme={theme} /></div>
         </div>
 
         <div className="cell cell-cluster">
@@ -434,6 +484,7 @@ export default function App() {
               candidates={suggestions?.candidates || []}
               onRadarClick={handleRadarClick}
               labelHelpers={{ isObject, isNoise, getPartner }}
+              theme={theme}
             />
           </div>
         </div>

@@ -1,12 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { getSquareFrame } from '../utils/squareFrame'
-
-const TAB20 = [
-  '#1f77b4','#aec7e8','#ff7f0e','#ffbb78','#2ca02c',
-  '#98df8a','#d62728','#ff9896','#9467bd','#c5b0d5',
-  '#8c564b','#c49c94','#e377c2','#f7b6d2','#7f7f7f',
-  '#c7c7c7','#bcbd22','#dbdb8d','#17becf','#9edae5'
-]
+import { canvasTheme, trackColor } from '../utils/theme'
 
 const VEL_MIN = -80, VEL_MAX = 80, RNG_MIN = 0, RNG_MAX = 70
 const PAD = 32
@@ -18,7 +12,7 @@ function toCanvas(vel, range, frame) {
   return { x, y }
 }
 
-export default function TrackCanvas({ trackHistory }) {
+export default function TrackCanvas({ trackHistory, theme = 'dark' }) {
   const canvasRef = useRef(null)
 
   const render = useCallback(() => {
@@ -28,38 +22,42 @@ export default function TrackCanvas({ trackHistory }) {
     const W = canvas.width, H = canvas.height
     const frame = getSquareFrame(canvas)
     const { size, offsetX, offsetY } = frame
+    const C = canvasTheme(theme)
 
     ctx.clearRect(0, 0, W, H)
-    ctx.fillStyle = '#0d1117'
+    ctx.fillStyle = C.bg
     ctx.fillRect(0, 0, W, H)
 
-    ctx.strokeStyle = '#22324a'
+    ctx.fillStyle = C.plot                       // plot area, tinted off the bg
+    ctx.fillRect(offsetX, offsetY, size, size)
+
+    ctx.strokeStyle = C.frame
     ctx.lineWidth = 1
     ctx.strokeRect(offsetX, offsetY, size, size)
 
     // grid
-    ctx.strokeStyle = '#1e2d3d'
+    ctx.strokeStyle = C.grid
     ctx.lineWidth = 0.5
     ctx.font = '9px Segoe UI'
     for (let v = -80; v <= 80; v += 20) {
       const { x } = toCanvas(v, 0, frame)
       ctx.beginPath(); ctx.moveTo(x, offsetY+PAD); ctx.lineTo(x, offsetY+size-PAD); ctx.stroke()
-      ctx.fillStyle = '#555'; ctx.textAlign = 'center'
+      ctx.fillStyle = C.tick; ctx.textAlign = 'center'
       ctx.fillText(v, x, offsetY+size-PAD+12)
     }
     for (let r = 0; r <= 70; r += 10) {
       const { y } = toCanvas(0, r, frame)
       ctx.beginPath(); ctx.moveTo(offsetX+PAD, y); ctx.lineTo(offsetX+size-PAD, y); ctx.stroke()
-      ctx.fillStyle = '#555'; ctx.textAlign = 'right'
+      ctx.fillStyle = C.tick; ctx.textAlign = 'right'
       ctx.fillText(r+'m', offsetX+PAD-4, y+3)
     }
 
     // v=0 axis
     const { x: zx } = toCanvas(0, 0, frame)
-    ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 1
+    ctx.strokeStyle = C.axis; ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(zx, offsetY+PAD); ctx.lineTo(zx, offsetY+size-PAD); ctx.stroke()
 
-    ctx.fillStyle = '#555'; ctx.font = '10px Segoe UI'; ctx.textAlign = 'center'
+    ctx.fillStyle = C.tick; ctx.font = '10px Segoe UI'; ctx.textAlign = 'center'
     ctx.fillText('Velocity (km/h)', offsetX+size/2, Math.min(offsetY+size+12, H-2))
     ctx.save(); ctx.translate(Math.max(offsetX-18, 8), offsetY+size/2); ctx.rotate(-Math.PI/2)
     ctx.fillText('Range (m)', 0, 0); ctx.restore()
@@ -68,7 +66,7 @@ export default function TrackCanvas({ trackHistory }) {
 
     trackHistory.forEach(tr => {
       if (!tr.history || tr.history.length < 2) return
-      const color = TAB20[(tr.track_id >= 0 ? tr.track_id : 19) % 20]
+      const color = trackColor(C, tr.track_id)
 
       ctx.strokeStyle = color
       ctx.lineWidth = 2
@@ -87,7 +85,7 @@ export default function TrackCanvas({ trackHistory }) {
       ctx.fillStyle = color; ctx.font = '9px Segoe UI'; ctx.textAlign = 'left'
       ctx.fillText(`ID ${tr.track_id}`, lx+6, ly+3)
     })
-  }, [trackHistory])
+  }, [trackHistory, theme])
 
   useEffect(() => {
     const canvas = canvasRef.current

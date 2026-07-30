@@ -7,6 +7,7 @@ export default function RightPanel({
   pairPendingFor, boxLinkPendingFor,
   onObject, onObjectNoBox, onNoise, onPair, onClear,
   onAutoLabel, canAutoLabel,
+  autoLabelAlways, onToggleAutoLabelAlways,
   labelHelpers,
   onSave, onBeforeEdit,
   onUndo, onRedo, canUndo, canRedo,
@@ -120,11 +121,11 @@ export default function RightPanel({
           <div className="box-info">
             ID {radarId} — {d.is_confirmed ? 'confirmed' : 'unconfirmed'}
             {d.energy != null && d.energy > 0 && (
-              <><br/><span style={{color:'#5dade2'}}>⚡ {(10 * Math.log10(d.energy)).toFixed(1)} dB</span></>
+              <><br/><span className="tag tag-energy">⚡ {(10 * Math.log10(d.energy)).toFixed(1)} dB</span></>
             )}
-            {objOn   && <><br/><span style={{color:'#2ecc71'}}>○ object {objBox != null ? `→ box ${objBox}` : '(no box)'}</span></>}
-            {noiseOn && <><br/><span style={{color:'#95a5a6'}}>△ noise</span></>}
-            {paired  && <><br/><span style={{color:'#f39c12'}}>□ paired with {partner}</span></>}
+            {objOn   && <><br/><span className="tag tag-object">○ object {objBox != null ? `→ box ${objBox}` : '(no box)'}</span></>}
+            {noiseOn && <><br/><span className="tag tag-noise">△ noise</span></>}
+            {paired  && <><br/><span className="tag tag-pair">□ paired with {partner}</span></>}
           </div>
         ) : (
           <div className="empty-hint">Click a centroid (✕) to select a point</div>
@@ -164,6 +165,23 @@ export default function RightPanel({
         <button className="auto-label-btn" onClick={onAutoLabel} disabled={!canAutoLabel}>
           ⚙ Auto-label this frame
         </button>
+
+        <label
+          className={`switch-bar ${autoLabelAlways ? 'on' : ''} ${!canAutoLabel ? 'disabled' : ''}`}
+          title="Run Auto-label on every frame you move to. Frames that already carry labels are skipped, so your manual work is never overwritten."
+        >
+          <input
+            type="checkbox"
+            checked={autoLabelAlways}
+            onChange={onToggleAutoLabelAlways}
+            disabled={!canAutoLabel}
+          />
+          <span className="switch-track"><span className="switch-thumb" /></span>
+          <span className="switch-text">
+            Auto on frame change
+            <span className="switch-sub">{autoLabelAlways ? 'ON — applies on every frame' : 'OFF — manual only'}</span>
+          </span>
+        </label>
         <button className="save-btn" onClick={onSave}>💾 Save</button>
         <div className="undo-redo-row">
           <button className="undo-btn" onClick={onUndo} disabled={!canUndo}>↩ Undo</button>

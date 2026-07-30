@@ -1,15 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { getSquareFrame } from '../utils/squareFrame'
-
-const TAB20 = [
-  '#1f77b4','#aec7e8','#ff7f0e','#ffbb78','#2ca02c',
-  '#98df8a','#d62728','#ff9896','#9467bd','#c5b0d5',
-  '#8c564b','#c49c94','#e377c2','#f7b6d2','#7f7f7f',
-  '#c7c7c7','#bcbd22','#dbdb8d','#17becf','#9edae5'
-]
-const OBJ_COLOR = '#2ecc71'
-const NOISE_COLOR = '#7f8c8d'
-const PAIR_PALETTE = ['#f39c12','#e74c3c','#9b59b6','#1abc9c','#3498db','#e67e22','#16a085','#e91e63']
+import { canvasTheme, trackColor } from '../utils/theme'
 
 const VEL_MIN = -80, VEL_MAX = 80, RNG_MIN = 0, RNG_MAX = 70
 const PAD = 32
@@ -23,16 +14,17 @@ function toCanvas(vel, range, frame) {
   return { x, y }
 }
 
-function pairColorFor(radarId, partnerId) {
+function pairColorFor(palette, radarId, partnerId) {
   const key = Math.min(radarId, partnerId)
-  const i = ((key % PAIR_PALETTE.length) + PAIR_PALETTE.length) % PAIR_PALETTE.length
-  return PAIR_PALETTE[i]
+  const n = palette.pair.length
+  const i = ((key % n) + n) % n
+  return palette.pair[i]
 }
 
 export default function ClusterCanvas({
   radarDetections, labeling, selectedRadar, pairPendingFor,
   candidates = [],   // Stage 3 nominations (display-only)
-  onRadarClick, labelHelpers
+  onRadarClick, labelHelpers, theme = 'dark'
 }) {
   const canvasRef = useRef(null)
   const { isObject, isNoise, getPartner } = labelHelpers
@@ -44,29 +36,32 @@ export default function ClusterCanvas({
     const W = canvas.width, H = canvas.height
     const frame = getSquareFrame(canvas)
     const { size, offsetX, offsetY } = frame
+    const C = canvasTheme(theme)
 
     ctx.clearRect(0, 0, W, H)
-    ctx.fillStyle = '#0d1117'
+    ctx.fillStyle = C.bg
     ctx.fillRect(0, 0, W, H)
-    ctx.strokeStyle = '#22324a'; ctx.lineWidth = 1
+    ctx.fillStyle = C.plot                       // plot area, tinted off the bg
+    ctx.fillRect(offsetX, offsetY, size, size)
+    ctx.strokeStyle = C.frame; ctx.lineWidth = 1
     ctx.strokeRect(offsetX, offsetY, size, size)
 
     // grid
-    ctx.strokeStyle = '#1e2d3d'; ctx.lineWidth = 0.5; ctx.font = '9px Segoe UI'
+    ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5; ctx.font = '9px Segoe UI'
     for (let v = -80; v <= 80; v += 20) {
       const { x } = toCanvas(v, 0, frame)
       ctx.beginPath(); ctx.moveTo(x, offsetY+PAD); ctx.lineTo(x, offsetY+size-PAD); ctx.stroke()
-      ctx.fillStyle = '#555'; ctx.textAlign = 'center'; ctx.fillText(v, x, offsetY+size-PAD+12)
+      ctx.fillStyle = C.tick; ctx.textAlign = 'center'; ctx.fillText(v, x, offsetY+size-PAD+12)
     }
     for (let r = 0; r <= 70; r += 10) {
       const { y } = toCanvas(0, r, frame)
       ctx.beginPath(); ctx.moveTo(offsetX+PAD, y); ctx.lineTo(offsetX+size-PAD, y); ctx.stroke()
-      ctx.fillStyle = '#555'; ctx.textAlign = 'right'; ctx.fillText(r+'m', offsetX+PAD-4, y+3)
+      ctx.fillStyle = C.tick; ctx.textAlign = 'right'; ctx.fillText(r+'m', offsetX+PAD-4, y+3)
     }
     const { x: zx } = toCanvas(0, 0, frame)
-    ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 1
+    ctx.strokeStyle = C.axis; ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(zx, offsetY+PAD); ctx.lineTo(zx, offsetY+size-PAD); ctx.stroke()
-    ctx.fillStyle = '#555'; ctx.font = '10px Segoe UI'; ctx.textAlign = 'center'
+    ctx.fillStyle = C.tick; ctx.font = '10px Segoe UI'; ctx.textAlign = 'center'
     ctx.fillText('Velocity (km/h)', offsetX+size/2, Math.min(offsetY+size+12, H-2))
     ctx.save(); ctx.translate(Math.max(offsetX-18, 8), offsetY+size/2); ctx.rotate(-Math.PI/2)
     ctx.fillText('Range (m)', 0, 0); ctx.restore()
@@ -75,7 +70,7 @@ export default function ClusterCanvas({
 
     radarDetections.forEach((d, i) => {
       const radarId = d.track_id
-      const baseColor = TAB20[(radarId >= 0 ? radarId : 19) % 20]
+      const baseColor = trackColor(C, radarId)
 
       // raw points
       if (d.points) {
@@ -91,7 +86,7 @@ export default function ClusterCanvas({
 
       // base X marker
       const xsz = isSel ? 6 : 4
-      ctx.strokeStyle = isSel ? '#fff' : baseColor
+      ctx.strokeStyle = isSel ? C.marker : baseColor
       ctx.lineWidth = isSel ? 2.5 : 1.5
       ctx.beginPath()
       ctx.moveTo(cx-xsz, cy-xsz); ctx.lineTo(cx+xsz, cy+xsz)
@@ -106,18 +101,18 @@ export default function ClusterCanvas({
       const hasInner = obj || noi
 
       if (obj) {
-        ctx.strokeStyle = OBJ_COLOR
+        ctx.strokeStyle = C.obj
         ctx.beginPath(); ctx.arc(cx, cy, RING_BASE, 0, Math.PI*2); ctx.stroke()
       }
       if (noi) {
-        ctx.strokeStyle = NOISE_COLOR
+        ctx.strokeStyle = C.noise
         ctx.beginPath()
         ctx.moveTo(cx, cy-RING_BASE); ctx.lineTo(cx+RING_BASE, cy+RING_BASE); ctx.lineTo(cx-RING_BASE, cy+RING_BASE)
         ctx.closePath(); ctx.stroke()
       }
       if (partner != null) {
         const pr = hasInner ? RING_BASE + RING_GAP : RING_BASE
-        ctx.strokeStyle = pairColorFor(radarId, partner)
+        ctx.strokeStyle = pairColorFor(C, radarId, partner)
         ctx.strokeRect(cx-pr, cy-pr, pr*2, pr*2)
       }
 
@@ -125,16 +120,16 @@ export default function ClusterCanvas({
       // Stage 3 candidate: dashed gold ring — a suggestion awaiting the
       // human's object↔box link, visually distinct from decided labels.
       if (candidates.includes(radarId)) {
-        ctx.strokeStyle = '#f0c419'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3])
+        ctx.strokeStyle = C.candidate; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3])
         ctx.beginPath(); ctx.arc(cx, cy, outerMax + 3, 0, Math.PI*2); ctx.stroke()
         ctx.setLineDash([])
       }
       if (isSel) {
-        ctx.strokeStyle = '#e94560'; ctx.lineWidth = 2
+        ctx.strokeStyle = C.sel; ctx.lineWidth = 2
         ctx.beginPath(); ctx.arc(cx, cy, outerMax+6, 0, Math.PI*2); ctx.stroke()
       }
       if (isPend) {
-        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.setLineDash([3,2])
+        ctx.strokeStyle = C.marker; ctx.lineWidth = 1.5; ctx.setLineDash([3,2])
         ctx.beginPath(); ctx.arc(cx, cy, outerMax+10, 0, Math.PI*2); ctx.stroke()
         ctx.setLineDash([])
       }
@@ -142,10 +137,10 @@ export default function ClusterCanvas({
       ctx.fillStyle = baseColor; ctx.font = '9px Segoe UI'; ctx.textAlign = 'left'
       ctx.fillText(`ID ${radarId}`, cx+outerMax+8, cy+3)
       if (!d.is_confirmed) {
-        ctx.fillStyle = '#555'; ctx.fillText('unconfirmed', cx+outerMax+8, cy+13)
+        ctx.fillStyle = C.tick; ctx.fillText('unconfirmed', cx+outerMax+8, cy+13)
       }
     })
-  }, [radarDetections, labeling, selectedRadar, pairPendingFor, candidates, isObject, isNoise, getPartner])
+  }, [radarDetections, labeling, selectedRadar, pairPendingFor, candidates, theme, isObject, isNoise, getPartner])
 
   useEffect(() => {
     const canvas = canvasRef.current

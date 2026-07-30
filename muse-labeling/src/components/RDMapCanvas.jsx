@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react'
+import { canvasTheme } from '../utils/theme'
 
 const N = 256          // matrix is N×N
 const VMIN = 0, VMAX = 30
@@ -7,7 +8,7 @@ const VMIN = 0, VMAX = 30
 //   ax_rd.imshow(10*np.log10(rd_power).T, origin="lower", cmap="gray_r", vmin=0, vmax=30)
 // Steps: 10*log10 -> transpose -> clip to [0,30] -> normalize -> gray_r (invert)
 // origin="lower" means matrix row 0 is drawn at the BOTTOM.
-export default function RDMapCanvas({ data }) {
+export default function RDMapCanvas({ data, theme = 'dark' }) {
   const canvasRef = useRef(null)
 
   const render = useCallback(() => {
@@ -15,10 +16,11 @@ export default function RDMapCanvas({ data }) {
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     const W = canvas.width, H = canvas.height
+    const C = canvasTheme(theme)
     ctx.clearRect(0, 0, W, H)
 
     if (!data || data.length < N * N) {
-      ctx.fillStyle = '#0d1117'
+      ctx.fillStyle = C.bg
       ctx.fillRect(0, 0, W, H)
       return
     }
@@ -39,8 +41,10 @@ export default function RDMapCanvas({ data }) {
         if (db > VMAX) db = VMAX
         const norm = (db - VMIN) / (VMAX - VMIN)
 
-        // gray_r: high value -> dark (invert)
-        const g = Math.round(255 * (1 - norm))
+        // gray_r: high value -> dark (invert). The white end is capped by the
+        // theme so the low-power background doesn't glare in light mode; the
+        // dark end stays at 0, so signal contrast is unchanged.
+        const g = Math.round(C.rdWhite * (1 - norm))
 
         // .T (transpose): plotted pixel (px, py) = matrix (r, c) -> (col=r, row=c)
         // origin="lower": flip vertically so row 0 sits at the bottom
@@ -63,11 +67,11 @@ export default function RDMapCanvas({ data }) {
     const size = Math.min(W, H)
     const ox = (W - size) / 2
     const oy = (H - size) / 2
-    ctx.fillStyle = '#0d1117'
+    ctx.fillStyle = C.bg
     ctx.fillRect(0, 0, W, H)
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(off, ox, oy, size, size)
-  }, [data])
+  }, [data, theme])
 
   useEffect(() => {
     const canvas = canvasRef.current
