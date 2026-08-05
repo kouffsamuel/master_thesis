@@ -497,20 +497,16 @@
 Unified MUSE processing/export pipeline.
 
 Examples:
-  python Processing/process.py --start 100 --end 1187 --frames-dir ./my_output_frames5 --no-video
-
-  python Processing/process.py --export-only --output-dir ./label_export \
-    --cfar-threshold 9.0 --dbscan-min-samples 2 --peak-metric mean --skip-yolo
-
-            python process2.py --export-only \
-                --start 100 --end 600 \
-                --cfar-threshold 12.0 --dbscan-eps 2.0 --dbscan-min-samples 3 \
-                --peak-metric mean \
-                --dataset-dir ../DATA/day-1 \
-                --output-dir day1_cfar12_ms3
+    python process2.py --export-only \
+        --start 100 --end 600 \
+        --cfar-threshold 12.0 --dbscan-eps 2.0 --dbscan-min-samples 3 \
+        --peak-metric mean \
+        --dataset-dir ../DATA/day-1 \
+        --output-dir day1_cfar12_ms3
 """
 
 import argparse
+import subprocess
 import json
 import multiprocessing as mp
 import shutil
@@ -990,6 +986,41 @@ def run_pipeline(args):
 
     print(f"Wrote {json_output_path}")
 
+    # ── Video assembly (restored) ───────────────────────────────────────────
+    # The old process2.py assembled a video inside the render loop; that
+    # coupled sequential encoding to the parallel frame rendering. Restored
+    # in decoupled form: frames render in parallel as before, then a single
+    # ffmpeg pass stitches combined/frame_%05d.jpeg into a video afterwards.
+    if not args.export_only and not args.no_video:
+        assemble_video(output_dirs["combined"], output_dir / "combined.mp4",
+                       framerate=args.video_fps, start=start)
+
+
+def assemble_video(frames_dir, out_path, framerate=14, start=0):
+    """Stitch combined/frame_%05d.jpeg into an H.264 mp4 via ffmpeg."""
+    frames_dir = Path(frames_dir)
+    if not any(frames_dir.glob("frame_*.jpeg")):
+        print("No combined frames found; skipping video assembly.")
+        return
+    cmd = [
+        "ffmpeg", "-y",
+        "-framerate", str(framerate),
+        "-start_number", str(start),
+        "-i", str(frames_dir / "frame_%05d.jpeg"),
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",   # yuv420p: plays everywhere
+        str(out_path),
+    ]
+    print("Assembling video:", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        print(f"Wrote {out_path}")
+    except FileNotFoundError:
+        print("ffmpeg not found — install it (apt install ffmpeg) or assemble manually:")
+        print("  " + " ".join(cmd[1:]))
+    except subprocess.CalledProcessError as e:
+        print("ffmpeg failed:")
+        print(e.stderr.decode(errors="replace")[-800:])
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -1022,7 +1053,11 @@ def parse_args():
     parser.add_argument(
         "--no-video",
         action="store_true",
-        help="Compatibility flag from process2.py; this script renders frames, not video.",
+        help="Skip video assembly (frames are still rendered to combined/).",
+    )
+    parser.add_argument(
+        "--video-fps", type=int, default=14,
+        help="Framerate for the assembled video (radar frame interval ~72 ms -> ~14 fps).",
     )
     return parser.parse_args()
 
