@@ -269,7 +269,7 @@ def main(config, checkpoint, difficult):
             range, angle = yolo_bbox_to_RA(xyxy)
             if not(-90 <= angle <= 90) or not (range >= 5 and range <= 100):
                 continue
-            bboxe = np.asarray(RA_to_cartesian_box([[range, angle]]))
+            bboxe = np.asarray(RA_to_cartesian_box([[range, angle]]))[:, :-2]
             yolo_box_corners.append(bboxe)
             yolo_cls.append(CLASS_TO_ID.get(yolo26_results.names[cls_id], -1))  # Map class name to ID, default to -1 if not found
             yolo_conf.append(conf)
@@ -296,7 +296,7 @@ def main(config, checkpoint, difficult):
             if len(true_obj) > 0:
                 ids = np.where((true_obj[:, 0] >= 5) & (true_obj[:, 0] <= 100))
                 true_obj = true_obj[ids]
-                ground_truth_box_corners = np.asarray(RA_to_cartesian_box(true_obj))
+                ground_truth_box_corners = np.asarray(RA_to_cartesian_box(true_obj))[:, :-2]
                 
                 # Convert GT bboxes from camera to radar coordinates for IoU calculation with YOLO predictions
                 for obj in true_obj:
@@ -307,17 +307,17 @@ def main(config, checkpoint, difficult):
                     x, y, _ = imageToWorld(u_c, v_c, z_world=0.0)
                     range_m = np.sqrt(x**2 + y**2)
                     angle   = np.degrees(np.arctan2(-x, y))
-                    boxe = RA_to_cartesian_box([[range_m, angle]])
+                    boxe = np.asarray(RA_to_cartesian_box([[range_m, angle]]))[:, :-2]
                     
                     ground_truth_box_gt_corners.append(boxe)
 
             ground_truth_box_gt_corners = np.asarray(ground_truth_box_gt_corners)
             all_frames.append((object_pred, true_obj, ground_truth_box_corners, yolo_box_corners, ground_truth_box_gt_corners, yolo_cls, yolo_conf))
         
-        with open("all_frames_radvit_adc_cls_2.pkl", "wb") as f:
+        with open("all_frames_radvit_new_adc_cls.pkl", "wb") as f:
             pickle.dump(all_frames, f)
     
-    # with open("all_frames_yolo26n.pkl", "rb") as f:
+    # with open("all_frames_radvit_new_adc_cls.pkl", "rb") as f:
     #     all_frames = pickle.load(f)
 
     radar_detections, yolo_detections = collect_detections(all_frames, iou_threshold=0.5, confidence_threshold=0.5)
@@ -336,7 +336,7 @@ def main(config, checkpoint, difficult):
         ax.set_title(f'Confusion Matrix — {title}')
 
     plt.tight_layout()
-    plt.savefig('confusion_matrices_yolo26n_rd.svg')
+    plt.savefig('confusion_matrices_new_adc.svg')
     plt.show()
     
 

@@ -6,7 +6,7 @@ import os
 
 
 def calibrate():
-    cam_files = glob.glob(os.path.join("/home/skouff/master_thesis/camera_calibration/calibration_files_paper", "*.png"))
+    cam_files = glob.glob(os.path.join("/DATA_MUSE/camera_calibration_files/camera/", "*.jpeg"))
 
     # Init checkerboard
     nRows = 7

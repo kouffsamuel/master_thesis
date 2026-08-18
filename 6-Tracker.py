@@ -4,13 +4,13 @@ import json
 import argparse
 import sys
 from matplotlib import gridspec, patches
+from matplotlib.animation import FFMpegWriter
 import pandas as pd
 import torch
 import random
 import numpy as np
 from utils.metrics import process_predictions_FFT, RA_to_cartesian_box
-from dataset.dataset import RADIal
-# from dataset.encoder import ra_encoder
+from dataset.encoder import ra_encoder
 from torch.utils.data import Dataset, DataLoader, DistributedSampler, random_split,Subset
 import torch.nn.functional as F
 from utils.evaluation import run_FullEvaluation
@@ -21,18 +21,23 @@ sys.path.append('/home/skouff/RADIal')
 sys.path.append('/home/skouff/T_FFTRadNet')
 from DBReader.DBReader import SyncReader
 from SignalProcessing import RadarSignalProcessing
-from RadIal.model.FFTRadNet_ViT import FFTRadNet_ViT
-from RadIal.dataset.encoder import ra_encoder
+
+# from RadIal.model.FFTRadNet_ViT import FFTRadNet_ViT
+# from RadIal.dataset.encoder import ra_encoder
+# from RadIal.utils.metrics import process_predictions_FFT, RA_to_cartesian_box
 import matplotlib.pyplot as plt
 from utils.tracking import MOTEvaluator, MultiObjectTracker, Tracker
 from utils.sort import Sort
+from utils.bytetrack.byte_tracker import BYTETracker
+from utils.bytetrack.basetrack import BaseTrack
 
 ID_TO_CLASS = {0:'car',1:'truck',2:'bicycle',3:'bus', 4:'person'}
 
 SEQUENCES = ['RECORD@2020-11-22_12.45.05',
              'RECORD@2020-11-22_12.25.47',
              'RECORD@2020-11-22_12.03.47',
-             'RECORD@2020-11-22_12.54.38']
+             'RECORD@2020-11-22_12.54.38'
+             ]
 
 
 class RealTimeViewer:
@@ -71,7 +76,7 @@ class RealTimeViewer:
             plt.close('all')
             os._exit(0)
 
-    def update(self, sort, kalman, pred_boxes, img, tracks=None, frame_idx=0):
+    def update(self, sort, kalman, bytetrack, pred_boxes, img, tracks=None, frame_idx=0):
 
         self.ax_pred.cla()
         self.ax_pred.set_xlim(-50, 50)
@@ -84,7 +89,7 @@ class RealTimeViewer:
         if len(pred_boxes) > 0 and kalman:
             boxes = pred_boxes[:, 1:9]
             # labels = pred_boxes[:, -1]
-        elif sort:
+        elif sort or bytetrack:
             boxes = pred_boxes
         else:  
             boxes = []
@@ -143,7 +148,7 @@ def corners_to_bbox(corners):
     x2, y2 = coords[:, 0].max(), coords[:, 1].max()
     return np.array([x1, y1, x2, y2, score])
 
-def main(config, checkpoint, sort=False, kalman=False):
+def main(config, checkpoint, sort=False, kalman=False, bytetrack=False, tfftradnet=False):
     """
     Main function to run the tracking evaluation on the RADIal dataset.
     Args:
@@ -158,11 +163,8 @@ def main(config, checkpoint, sort=False, kalman=False):
     torch.cuda.manual_seed(config['seed'])
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    # parameters = config['model']['vit']
-    # net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], 
-    #              parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], 
-    #              data_mode=config['data_mode'])
-    net = FFTRadNet_ViT(patch_size = config['model']['patch_size'],
+    if tfftradnet: 
+        net = FFTRadNet_ViT(patch_size = config['model']['patch_size'],
                         channels = config['model']['channels'],
                         in_chans = config['model']['in_chans'],
                         embed_dim = config['model']['embed_dim'],
@@ -172,7 +174,11 @@ def main(config, checkpoint, sort=False, kalman=False):
                         regression_layer = 2,
                         detection_head = config['model']['DetectionHead'],
                         segmentation_head = config['model']['SegmentationHead'])
-
+    else:
+        parameters = config['model']['vit']
+        net = RadViT(parameters['D'], parameters['p'], parameters['H'], parameters['W'], parameters['neuron'], 
+                    parameters['mha'], parameters['layer'], parameters['dropout'], parameters['n_encoders'], 
+                    data_mode=config['data_mode'])
     net.to(device)
 
     enc = ra_encoder(
@@ -182,22 +188,35 @@ def main(config, checkpoint, sort=False, kalman=False):
     )
 
     dict = torch.load(checkpoint, weights_only=False)
-    # dict = {k.replace('module.', ''): v for k, v in dict['net_state_dict'].items()}
-    net.load_state_dict(dict['net_state_dict'])
+    if tfftradnet:
+        net.load_state_dict(dict['net_state_dict'])
+    else:
+        dict = {k.replace('module.', ''): v for k, v in dict['net_state_dict'].items()}
+        net.load_state_dict(dict)
     net.eval()
 
     viewer = RealTimeViewer()
+    # writer = FFMpegWriter(fps=5)
+
+    # output_video = f"/home/skouff/master_thesis/tracking_video_bytetrack.mp4"
 
     gt_tracks = pd.read_csv("/home/skouff/master_thesis/gt_tracks_manual.csv")
     all_accs = []
+
+    # with writer.saving(viewer.fig, output_video, dpi=200):
+
     for i, sequence in enumerate(SEQUENCES):
         evaluator = MOTEvaluator()
-        print(f"Processing sequence {sequence} ({i+1}/{len(SEQUENCES)})")
+        print(f"Processing sequence {sequence} ({i+1}/{len(SEQUENCES)})")   
 
         if sort:
             tracker = Sort(max_age=8, min_hits=4, iou_threshold=0.3)
         if kalman:
             tracker = MultiObjectTracker(max_misses=8, min_hits=4, mahal_threshold=9.21)
+        if bytetrack:
+            BaseTrack._count = 0  # Reset track ID counter for each sequence
+            args = argparse.Namespace(track_thresh=0.5, track_buffer=20, match_thresh=0.6, mot20=False)
+            tracker = BYTETracker(args, frame_rate=5)
 
         Tracker._id_counter = 0 
         db = SyncReader( os.path.join('/Benson_DATA3/Public/RADIal/raw_sequences/', sequence), tolerance=20000, silent=True)
@@ -211,7 +230,8 @@ def main(config, checkpoint, sort=False, kalman=False):
                 print(f"End of sequence {sequence}")
                 break
 
-            img = data['camera']['data']
+            img = cv2.cvtColor(data['camera']['data'], cv2.COLOR_BGR2RGB)
+            
             idx = data['radar_ch0']['index']
             gt_frame = gt_tracks[(gt_tracks['index'] == idx) & (gt_tracks['dataset'] == sequence)]
             rd = RSP.run(data['radar_ch0']['data'],data['radar_ch1']['data'],data['radar_ch2']['data'],data['radar_ch3']['data'])
@@ -223,7 +243,7 @@ def main(config, checkpoint, sort=False, kalman=False):
             with torch.no_grad():
                 rd_tensor = torch.from_numpy(rd).permute(2,0,1).unsqueeze(0).to(device).float()
                 outputs = net(rd_tensor) 
-               
+                
             out_obj = outputs['Detection'].detach().cpu().numpy().copy()
 
             predictions = []
@@ -243,20 +263,37 @@ def main(config, checkpoint, sort=False, kalman=False):
                 predictions.append(object_pred)
 
             predictions = np.concatenate(predictions, axis=0)
-            if sort: 
+            if sort or bytetrack: 
                 # For Sort tracker, convert boxes to format [x1, y1, x2, y2, conf]
-                predictions = np.array([corners_to_bbox(pred[:-1]) for pred in predictions])
+                if tfftradnet:
+                    predictions = np.array([corners_to_bbox(pred) for pred in predictions])
+                else:
+                    predictions = np.array([corners_to_bbox(pred[:-1]) for pred in predictions])
                 if predictions.shape[0] == 0:
                     predictions = np.empty((0, 5))
 
-            active = tracker.update(predictions)
+            if bytetrack:
+                active = tracker.update(predictions, img_info=[128, 224], img_size=(128, 224))
+            else:
+                active = tracker.update(predictions)
             
             if sort:
                 active[:,4] -=1
                 active_tracks = [{ 'centroid': [(t[0] + t[2]) / 2, (t[1] + t[3]) / 2], 'id': int(t[4])} for t in active]
                 active = active_tracks
+            if bytetrack:
+                active_tracks = []
+                for t in active:
+                    id = t.track_id - 1
+                    tlbr = t.tlbr
+                    cx = (tlbr[0] + tlbr[2]) / 2
+                    cy = (tlbr[1] + tlbr[3]) / 2
+                    active_tracks.append({'centroid': [cx, cy], 'id': id})
+                active = active_tracks
 
-            viewer.update(sort, kalman, pred_boxes=predictions, img=img, tracks=active, frame_idx=j)
+            viewer.update(sort, kalman, bytetrack, pred_boxes=predictions, img=img, tracks=active, frame_idx=j)
+            # writer.grab_frame()
+            plt.pause(0.001)
             if not gt_frame.empty:
                 evaluator.update(gt_frame, active, frame_idx=idx)
             
@@ -278,8 +315,10 @@ if __name__=='__main__':
                         help='Path to the .pth model checkpoint to resume training')
     parser.add_argument('--sort', action='store_true', help='Use SORT tracker instead of Kalman', default=False)
     parser.add_argument('--kalman', action='store_true', help='Use Kalman tracker', default=False)
+    parser.add_argument('--bytetrack', action='store_true', help='Use ByteTrack tracker', default=False)
+    parser.add_argument('--tfftradnet', action='store_true', help='Use TFFTRadNet model', default=False )
     args = parser.parse_args()
 
     config = json.load(open(args.config))
 
-    main(config, args.checkpoint, sort=args.sort, kalman=args.kalman)
+    main(config, args.checkpoint, sort=args.sort, kalman=args.kalman, bytetrack=args.bytetrack, tfftradnet=args.tfftradnet)

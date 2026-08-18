@@ -66,10 +66,10 @@ def main(config=None, resume=None, exp_name=None):
     # pretrained weights for the detection head and DFT module for ADC, 
     # while keeping the rest of the model randomly initialized. 
     if config['data_mode'] == 'ADC':
-        checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_ADC.pth", weights_only=False, map_location='cpu')
+        checkpoint = torch.load("/home/skouff/master_thesis/model/Trained_models/RADIal_SwinTransformer_ADC.pth", weights_only=False, map_location='cpu')
         model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection') or k.startswith('DFT')}
     else:
-        checkpoint = torch.load("/home/skouff/master_thesis/model/RADIal_SwinTransformer_RD_Shift.pth", weights_only=False, map_location='cpu')
+        checkpoint = torch.load("/home/skouff/master_thesis/model/Trained_models/RADIal_SwinTransformer_RD_Shift.pth", weights_only=False, map_location='cpu')
         model_state_dict = {k: v for k, v in checkpoint['net_state_dict'].items() if k.startswith('detection')}
     
     net.load_state_dict(model_state_dict, strict=False)

@@ -24,7 +24,7 @@ def RA_to_cartesian_box(data):
         x = np.sin(np.radians(data[i][1])) * data[i][0]
         y = np.cos(np.radians(data[i][1])) * data[i][0]
 
-        boxes.append([x - W/2,y,x + W/2,y, x + W/2,y+L,x - W/2,y+L])
+        boxes.append([x - W/2,y,x + W/2,y, x + W/2,y+L,x - W/2,y+L, data[i][0],data[i][1]])
 
     return boxes
 
@@ -40,7 +40,7 @@ def perform_nms(valid_class_predictions, valid_box_predictions, valid_class_id_p
         # get the IOUs of all boxes with the currently most certain bounding box
         try:
             ious = np.zeros((sorted_box_predictions.shape[0]))
-            ious[i + 1:] = bbox_iou(sorted_box_predictions[i, :], sorted_box_predictions[i + 1:, :])
+            ious[i + 1:] = bbox_iou(sorted_box_predictions[i, :8], sorted_box_predictions[i + 1:, :8])
         except ValueError:
             break
         except IndexError:

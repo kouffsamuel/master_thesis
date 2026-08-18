@@ -9,7 +9,6 @@ import os
 from PIL import Image
 
 from dataset.encoder import ra_encoder
-from kmd2_processing.processing import compute_ra, get_complex_content
 from utils.metrics import GetDetMetrics
 from model.RadViT import RadViT
 from utils.metrics import RA_to_cartesian_box, process_predictions_FFT
@@ -194,12 +193,9 @@ def main(config):
     viewer = RealTimeViewer()
     writer = FFMpegWriter(fps=15)
 
-    with writer.saving(viewer.fig, output_video, dpi=200):
-        for i in range(len(fft_files)):
-            viewer.update(i, enc, net, device)
-            writer.grab_frame()
-
-            plt.pause(0.001)
+    for i in range(len(fft_files)):
+        viewer.update(i, enc, net, device)
+        plt.pause(0.001)
 
     plt.ioff()
     plt.show()

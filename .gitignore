@@ -213,6 +213,11 @@ model/Trained_models/*.pth
 /dataset/yolo26n.pt
 /dataset/*.log
 *.log
-/kmd2_processing/*.png
-/kmd2_processing/*.npy
+/camera_radar_lidar_processing/measurements
 experiments.md
+*.pkl
+*.svg
+*.mp4
+*.jpg
+*.png
+/camera_radar_lidar_processing/annotations/labels.json

@@ -1,1 +1,1 @@
-from .cfar import CA_CFAR
+from .processing.cfar import CA_CFAR

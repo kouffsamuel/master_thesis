@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from filterpy.kalman import KalmanFilter
-import random
 
 MAX_MISSES = 40
 GATE_THRESHOLD = 5
@@ -44,34 +43,6 @@ class Tracking:
         kf.track_id = None
 
         return kf
-
-    
-    def extract_clusters(self, detected_bins, labels, rd_matrix, peak_met="mean"):
-        clusters = []
-
-        doppler_bins, range_bins = np.array(detected_bins)
-
-
-        for k in set(labels):
-            if k == -1:
-                continue
-            mask = (labels == k)
-            pts = np.column_stack((doppler_bins[mask], range_bins[mask]))
-            r = np.mean(pts[:, 1])
-            d = np.mean(pts[:, 0])
-            if peak_met == "mean":
-                p = np.mean(rd_matrix[pts[:, 0], pts[:, 1]])
-            elif peak_met == "max":
-                p = np.max(rd_matrix[pts[:, 0], pts[:, 1]])
-            elif peak_met == "median":
-                p = np.median(rd_matrix[pts[:, 0], pts[:, 1]])
-
-            clusters.append({
-                "centroid": np.array([r,d]),
-                "power": p,
-                "points": pts
-            })
-        return clusters
 
     
     def associate(self, tracks, clusters):

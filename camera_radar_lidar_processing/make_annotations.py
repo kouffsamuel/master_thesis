@@ -18,12 +18,12 @@ import numpy as np
 from PIL import Image
 from sklearn.cluster import DBSCAN
 
-from cfar import CA_CFAR
-from radar_processing import compute_rd
+from master_thesis.camera_radar_lidar_processing.processing.cfar import CA_CFAR
+from master_thesis.camera_radar_lidar_processing.processing.radar_processing import compute_rd, clusterize_radar
 from tracking import Tracking
-from utils import find_closest_index, load_files
+from master_thesis.camera_radar_lidar_processing.processing.utils import find_closest_index, load_files
 from real_time_viewer import RealTimeViewer
-from radar_parameters import N, velocity_bins, range_bins
+from master_thesis.camera_radar_lidar_processing.processing.radar_parameters import N, velocity_bins, range_bins
 from scipy.ndimage import binary_closing, binary_opening
 
 
@@ -212,71 +212,8 @@ def run_pipeline(args):
 
         rd_raw_name = f"frame_{fi}_rd.raw"
 
-        peaks = cfar(rd_power)
-        mask = peaks > 0
-        closed = binary_closing(mask, structure=np.ones((5,3))) 
-        opened = binary_opening(closed, structure=np.ones((2,2)))
-        detected_bins = np.where(opened > 0)
-
-        # TODO For every peak that is been detected, we need to check if the mirorring peak
-        # has a lower amplitude than the main peak. The mirrorring peak is always at 
-        # -velocity of current peak and range is at 70m - current range of peak. If it has 
-        # lower amplitude we should not include it in the detected_bins.
-
-
-        if len(detected_bins[0]) > 0:
-            d_idx, r_idx = detected_bins
-            n_peaks = len(d_idx)
-
-            bin_to_pos = {
-                (int(d_idx[k]), int(r_idx[k])): k for k in range(n_peaks)
-            }
-
-            bins_to_remove = set()
-
-            for k in range(n_peaks):
-                d_bin = d_idx[k]
-                r_bin = r_idx[k]
-
-                mirror_velocity = -velocity_bins[d_bin]
-                mirror_range = range_bins[-1] - range_bins[r_bin]
-
-                mirror_d_bin = find_closest_index(velocity_bins, mirror_velocity)
-                mirror_r_bin = find_closest_index(range_bins, mirror_range)
-
-                if mirror_d_bin == d_bin and mirror_r_bin == r_bin:
-                    continue
-
-                mirror_pos = bin_to_pos.get((mirror_d_bin, mirror_r_bin))
-                if mirror_pos is None:
-                    continue
-
-                main_amplitude = rd_power_wo[d_bin, r_bin]
-                mirror_amplitude = rd_power_wo[mirror_d_bin, mirror_r_bin]
-
-                if mirror_amplitude < main_amplitude:
-                    bins_to_remove.add((mirror_d_bin, mirror_r_bin))
-
-            if bins_to_remove:
-                detected_bins_filtered = [[], []]
-                for d_bin, r_bin in zip(d_idx, r_idx):
-                    if (int(d_bin), int(r_bin)) in bins_to_remove:
-                        continue
-                    detected_bins_filtered[0].append(d_bin)
-                    detected_bins_filtered[1].append(r_bin)
-            else:
-                detected_bins_filtered = [d_idx, r_idx]
-
-            dbscan.fit(np.array(detected_bins_filtered).T)
-            labels = dbscan.labels_
-            clusters = tracker.extract_clusters(
-                detected_bins_filtered,
-                labels,
-                rd_power_wo,
-                peak_met=args.peak_metric,
-            )
-        else:
-            clusters = []
+        clusters, peaks = clusterize_radar(rd_power, rd_power_wo, cfar, dbscan, args.peak_metric)
+        
 
         tracker.step(clusters)
         track_by_id = {track.track_id: track for track in tracker.tracks}
@@ -324,7 +261,7 @@ def run_pipeline(args):
                       camera_times=cam_times[i], 
                       rd_power=rd_power, 
                       img=img, 
-                      peaks=opened, 
+                      peaks=peaks, 
                       clusters=clusters, 
                       bboxes_data=bboxes_for_render, 
                       simple_tracks=simple_tracks, 

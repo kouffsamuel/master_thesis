@@ -21,7 +21,8 @@ Sequences = {'Validation':
                 'RECORD@2020-11-22_12.45.05',
                 'RECORD@2020-11-22_12.25.47',
                 'RECORD@2020-11-22_12.03.47',
-                'RECORD@2020-11-22_12.54.38']}
+                'RECORD@2020-11-22_12.54.38'
+                ]}
 
 def RADIal_collate(batch):
     radar_FFTs = [b[0] for b in batch]

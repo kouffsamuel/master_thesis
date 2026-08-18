@@ -2,8 +2,9 @@ from matplotlib.gridspec import GridSpec
 import matplotlib.pyplot as plt
 import os
 import numpy as np
-from radar_parameters import velocity_bins, range_bins, N
-from lidar_processing import COLOR_MODE, DISPLAY_HFOV, DISPLAY_VFOV, NEAR, PITCH, POINT_SIZE, ROLL, YAW, IMAGE_HEIGHT, IMAGE_WIDTH,  project, colorize
+from pathlib import Path
+from processing.radar_parameters import velocity_bins, range_bins, N
+from processing.lidar_processing import COLOR_MODE, DISPLAY_HFOV, DISPLAY_VFOV, NEAR, PITCH, POINT_SIZE, ROLL, YAW, IMAGE_HEIGHT, IMAGE_WIDTH,  project, colorize
 
 CMAP = plt.get_cmap("tab20")
 
@@ -19,6 +20,8 @@ class RealTimeViewer:
     def __init__(self, panels=("rd", "cam")):
         self.paused = False
         self.panels = list(panels)
+        self.save_dir = Path("/home/skouff/master_thesis/camera_calibration/new_calibration_files_paper")
+
 
         self.ax = {}
         self.im = {}
@@ -70,11 +73,18 @@ class RealTimeViewer:
                 ax.set_aspect("equal", adjustable="box")
                 ax.grid(True)
 
+    def _save_fig(self):
+        self.save_counter += 1
+        filename = os.path.join(self.save_dir, f"frame_{self.save_counter:04d}.png")
+        self.fig.savefig(filename, dpi=150, bbox_inches="tight")
+        print(f"Figure sauvegardée : {filename}")
 
     def on_key(self, event):
         if event.key == 'p':
             self.paused = not self.paused
             print("Paused" if self.paused else "Resuming")
+        elif event.key == 'f':
+            self._save_fig()
         elif event.key == 'q':
             print("Quitting...")
             plt.close('all')
