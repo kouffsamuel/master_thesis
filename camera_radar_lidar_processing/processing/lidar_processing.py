@@ -7,8 +7,6 @@ from matplotlib.colors import LinearSegmentedColormap
 # ==========================================
 
 IMAGE_WIDTH = 1920
-HFOV = 55
-VFOV = 38
 IMAGE_HEIGHT = 1080
 YAW = 0
 PITCH = 0
@@ -23,31 +21,12 @@ CMAP_HOT = LinearSegmentedColormap.from_list(
     "lidar_hot", ["#000000", "#3d0000", "#8b0000", "#e01b00", "#ff8c00", "#ffd24a"]
 )
 
-DISPLAY_HFOV = 55     # <= 120°
+DISPLAY_HFOV = 64     # <= 120°
 DISPLAY_VFOV = 38      # <= 25°
 
 # ==========================================
 # LIDAR PROCESSING
 # ==========================================
-
-def filter_fov(pts, hfov, vfov):
-
-    horizontal = np.degrees(np.arctan2(pts["y"], pts["x"]))
-
-    vertical = np.degrees(
-        np.arctan2(
-            pts["z"],
-            np.sqrt(pts["x"]**2 + pts["y"]**2)
-        )
-    )
-
-    mask = (
-        (np.abs(horizontal) <= hfov / 2) &
-        (np.abs(vertical) <= vfov / 2)
-    )
-
-    return {k: v[mask] for k, v in pts.items()}
-
 
 def load_lidar(file):
     """
@@ -141,90 +120,3 @@ def colorize(pts, keep, depth, mode="reflectivity", cmap=CMAP_HOT):
     rgba[:, :3] *= fade[:, None]
     return rgba
 
-def voxelize_background(background, voxel_size=0.30):
-    """
-    Convertit un nuage de points en une représentation voxelisée.
-    """
-
-    # Indice du voxel auquel appartient chaque point
-    voxel_idx = np.floor(background / voxel_size).astype(np.int32)
-
-    # On ne garde qu'un voxel de chaque type
-    voxel_idx = np.unique(voxel_idx, axis=0)
-
-    # Centre de chaque voxel
-    voxel_centers = (voxel_idx + 0.5) * voxel_size
-
-    return voxel_centers
-
-def build_background(lidar_files, n_background=10):
-
-    background = []
-
-    for f in lidar_files[-n_background:]:
-
-        pts = load_lidar(f)
-        pts = filter_fov( pts, DISPLAY_HFOV,DISPLAY_VFOV )
-
-
-        if pts is None:
-            continue
-
-        xyz = np.column_stack((
-            pts["x"],
-            pts["y"],
-            pts["z"]
-        ))
-
-        background.append(xyz)
-
-    background = np.vstack(background)
-
-    background_voxels = voxelize_background(
-        background,
-        voxel_size=0.30
-    )
-
-    return background_voxels,background
-
-def remove_background(points,
-                      background_voxels,
-                      voxel_size=0.30):
-    """
-    Remove background points based on voxel occupancy.
-    """
-
-    # Coordonnées des points
-    xyz = np.column_stack((
-        points["x"],
-        points["y"],
-        points["z"]
-    ))
-
-    # Voxel de chaque point de la frame
-    point_voxels = np.floor(xyz / voxel_size).astype(np.int32)
-
-    # Voxel du background
-    background_idx = np.floor(
-        background_voxels / voxel_size
-    ).astype(np.int32)
-
-    background_set = set(map(tuple, background_idx))
-
-    # On conserve uniquement les points qui ne sont PAS dans un voxel du background
-    mask = np.array(
-        [tuple(v) not in background_set for v in point_voxels],
-        dtype=bool
-    )
-
-    return {k: v[mask] for k, v in points.items()}
-
-
-def xyz_to_points(xyz):
-
-    return {
-        "x": xyz[:,0],
-        "y": xyz[:,1],
-        "z": xyz[:,2],
-        "reflectivity": np.ones(len(xyz))
-    }

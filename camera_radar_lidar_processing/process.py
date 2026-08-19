@@ -11,7 +11,7 @@ from processing.radar_processing import compute_rd
 from processing.lidar_processing import load_lidar
 
 data_path = "/DATA_MUSE"
-folder_path = f"{data_path}/2026_08_17_17_07_03/"
+folder_path = f"{data_path}/camera_calibration_files/"
 # folder_path = f"{data_path}/2026_08_17_11_53_08/"
 
 # folder_path = f"{data_path}/2026_07_23_17_22_04/" # Avec plexi

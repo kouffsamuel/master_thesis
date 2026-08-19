@@ -9,14 +9,6 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from scipy.spatial import cKDTree
-
-# ==========================================
-# DISPLAY FIELD OF VIEW
-# ==========================================
-DISPLAY_HFOV = 70.0      # <= 120°
-DISPLAY_VFOV = 20.0      # <= 25°
-
-
 # ==========================================
 # CLUSTERING
 # ==========================================
@@ -56,7 +48,6 @@ def filter_fov(pcd, hfov, vfov):
     )
 
     pcd.points = o3d.utility.Vector3dVector(pts[mask])
-
 
     return pcd
 
@@ -145,60 +136,55 @@ def voxelize_background(background, voxel_size=0.30):
     return voxel_centers
 
 
-def build_background(lidar_files, n_background=10):
+def build_background(lidar_files, n_background=10, voxel_size=0.30, alpha=0.3):
+    voxel_occupancy = {}  
+    voxel_max_occ = {}   
 
-    background = []
-
-    #for f in lidar_files[-n_background:]:
-    for f in lidar_files[:n_background]:    
-
+    for f in lidar_files[:n_background]:
         pcd = load_lidar(f)
-        if pcd is None:
+        if pcd is None or pcd.is_empty():
             continue
 
-        # pcd = filter_fov( pcd , DISPLAY_HFOV,DISPLAY_VFOV)
-        if pcd.is_empty():
-            continue
-    
         pts = np.asarray(pcd.points, dtype=np.float32)
+        voxel_keys = set(map(tuple, np.floor(pts / voxel_size).astype(int)))
 
-        background.append(pts)
+        for key in list(voxel_occupancy.keys()):
+            voxel_occupancy[key] *= (1 - alpha)
 
-    background = np.vstack(background)
+        for key in voxel_keys:
+            voxel_occupancy[key] = voxel_occupancy.get(key, 0.0) + alpha
+            if voxel_occupancy[key] > voxel_max_occ.get(key, 0.0):
+                voxel_max_occ[key] = voxel_occupancy[key]
 
-    background_voxels = voxelize_background(
-        background,
-        voxel_size=0.30
-    )
-    background_tree = cKDTree(background_voxels)
+    return voxel_max_occ 
 
-    return background_voxels, background_tree,background
+def remove_background(pcd, voxel_occupancy, voxel_size=0.30, occupancy_threshold=0.6, check_neighbors=True):
+    if pcd is None or pcd.is_empty():
+        return o3d.geometry.PointCloud()
 
+    pts = np.asarray(pcd.points, dtype=np.float32)
+    voxel_keys = np.floor(pts / voxel_size).astype(int)
 
-def remove_background(pcd, background_voxels, voxel_size=0.30):
-    """
-    Remove background points based on voxel occupancy.
-    """
+    if not check_neighbors:
+        is_background = np.array([
+            voxel_occupancy.get(tuple(k), 0.0) >= occupancy_threshold
+            for k in voxel_keys
+        ])
+    else:
+        # regarde aussi les voxels voisins directs (gère la dilution aux frontières)
+        offsets = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)]
+        is_background = np.zeros(len(voxel_keys), dtype=bool)
+        for i, k in enumerate(voxel_keys):
+            for off in offsets:
+                neighbor = (k[0]+off[0], k[1]+off[1], k[2]+off[2])
+                if voxel_occupancy.get(neighbor, 0.0) >= occupancy_threshold:
+                    is_background[i] = True
+                    break
 
-    pts = np.asarray(pcd.points)
-
-    if len(pts) == 0:
-        return pcd
-
-    # Voxel de chaque point de la frame
-    point_voxels = np.floor(pts / voxel_size).astype(np.int32)
-
-    # Voxel du background
-    background_idx = np.floor(background_voxels / voxel_size).astype(np.int32)
-
-    background_set = set(map(tuple, background_idx))
-
-    # Conserver uniquement les points hors du background
-    keep = [
-        i for i, voxel in enumerate(point_voxels)
-        if tuple(voxel) not in background_set ]
-
-    return pcd.select_by_index(keep)
+    filtered_pts = pts[~is_background]
+    filtered_pcd = o3d.geometry.PointCloud()
+    filtered_pcd.points = o3d.utility.Vector3dVector(filtered_pts)
+    return filtered_pcd
 
 #---------------------------------------------
 # CLUSTERING

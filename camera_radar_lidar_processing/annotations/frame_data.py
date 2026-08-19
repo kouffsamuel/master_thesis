@@ -14,13 +14,14 @@ from annotations.master_source import MasterSource
 
 HFOV_CAMERA = 56
 VFOV_CAMERA = 33
+# HFOV_CAMERA = 64    
+# VFOV_CAMERA = 38 
 
 @dataclass
 class FrameData:
-    i: int
-    t: float
-    cam_times: float
-    idx_cam: int
+    t_radar: float
+    t_camera: float
+    t_lidar: float
     rd_power: np.ndarray
     clusters_radar: list = field(default_factory=list)
     img: np.ndarray = None
@@ -42,21 +43,20 @@ class FrameProcessor:
 
         self.background_radar = background_radar
      
-        self.background_voxels, self.background_tree, self.background = build_background(lidar_files, n_background=50)
+        self.voxel_occupancy = build_background(lidar_files, n_background=50)
         self.cfar = CA_CFAR(win_param=(12, 12, 4, 6), threshold=10, rd_size=(N, N))
         self.dbscan = DBSCAN(eps=10, min_samples=5)
         self.distance_history = {}
 
     def process(self, i: int) -> FrameData:
-        t = self.raw_times[i]
+        t_radar = self.raw_times[i]
 
         rd_power, clusters_radar = self._process_radar(i)
-        img, idx_cam = self._load_camera_image(t)
-        cam_times = self.cam_times[idx_cam]
-        clusters_lidar = self._process_lidar(t)
+        img, idx_cam = self._load_camera_image(t_radar)
+        t_camera = self.cam_times[idx_cam]
+        t_lidar, clusters_lidar = self._process_lidar(t_radar)
 
-
-        context = {"img": img, "clusters_lidar": clusters_lidar, "t": t}
+        context = {"img": img}
         master_detections = self.master.detect(context)
 
         if clusters_lidar and master_detections:
@@ -69,7 +69,7 @@ class FrameProcessor:
             )
 
         return FrameData(
-            i=i, t=t, cam_times=cam_times, idx_cam=idx_cam, rd_power=rd_power,
+            t_radar=t_radar, t_camera=t_camera, t_lidar=t_lidar, rd_power=rd_power,
             clusters_radar=clusters_radar, img=img,
             clusters_lidar=clusters_lidar, master_detections=master_detections,
         )
@@ -88,13 +88,15 @@ class FrameProcessor:
 
     def _process_lidar(self, t):
         idx_lidar = find_closest_index(self.lidar_times, t)
+        t_lidar = self.lidar_times[idx_lidar]
         pts_raw = load_lidar(self.lidar_files[idx_lidar])
         if pts_raw is None:
             return []
-
-        pts = remove_background(pts_raw, self.background_voxels)
+        
+        pts = remove_background(pts_raw, self.voxel_occupancy)
         pts = filter_fov(pts, HFOV_CAMERA, VFOV_CAMERA)
-        return clusterize(pts)
+
+        return t_lidar, clusterize(pts)
 
     def _update_distance_history(self, clusters_lidar):
         for cluster in clusters_lidar:

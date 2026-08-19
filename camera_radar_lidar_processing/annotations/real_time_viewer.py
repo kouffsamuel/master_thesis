@@ -26,6 +26,7 @@ class RealTimeViewer:
         self.cbar = None
         self.im_cam = None
         self.scatter_lidar = None
+        self.scatter_lidar_points = None
 
         self.title_rd = self.ax_rd.set_title("")
         self.ax_rd.set_xlabel("Velocity (km/h)")
@@ -69,7 +70,7 @@ class RealTimeViewer:
         else:
             self.im_rd.set_data((10 * np.log10(rd_power)).T)
 
-        self.title_rd.set_text(f"Radar t = {frame.t:.6f}")
+        self.title_rd.set_text(f"Radar t = {frame.t_radar:.6f}")
         self._render_cluster_radar(self.ax_rd, frame.clusters_radar)
 
     def _get_color_for_detection_id(self,det_id):
@@ -121,7 +122,7 @@ class RealTimeViewer:
                                   edgecolor=self._get_color_for_detection_id(det_id), zorder=10)
             self.ax_cam.add_patch(rect)
 
-        self.ax_cam.set_title(f"Camera t = {frame.cam_times:.6f}")
+        self.ax_cam.set_title(f"Camera t = {frame.t_camera:.6f}")
         self._render_lidar_overlay(frame.clusters_lidar)
 
     def _render_lidar_overlay(self, clusters_lidar):
@@ -184,3 +185,42 @@ class RealTimeViewer:
                 self.scatter_lidar.set_sizes(sizes_cat)
         elif self.scatter_lidar is not None:
             self.scatter_lidar.set_offsets(np.empty((0, 2)))
+
+    def _render_lidar_points_overlay(self, pcd_full, color=(0.0, 1.0, 0.4), point_size=8.0):
+        """
+        Affiche tous les points LiDAR (avant clustering) projetés dans l'image caméra,
+        sans distinction d'ID puisqu'aucun matching n'existe à ce niveau.
+        """
+        if pcd_full is None or pcd_full.is_empty():
+            if self.scatter_lidar_points is not None:
+                self.scatter_lidar_points.set_offsets(np.empty((0, 2)))
+            return
+
+        u, v, forward, keep = project_real_camera(
+            pcd_full, self.camMatrix, self.distCoeff, IMAGE_WIDTH, IMAGE_HEIGHT
+        )
+
+        if len(u) == 0:
+            if self.scatter_lidar_points is not None:
+                self.scatter_lidar_points.set_offsets(np.empty((0, 2)))
+            return
+
+        base_color = np.array(color + (1.0,))
+        rgba = np.tile(base_color, (len(u), 1))
+
+        # Fondu selon la distance, comme pour les clusters
+        fade = np.clip(
+            1.05 - 0.35 * (forward / max(np.percentile(forward, 97), 1e-6)),
+            0.35, 1.0
+        )
+        rgba[:, :3] *= fade[:, None]
+        size = np.clip(point_size * 26.0 / forward, 0.5, 40.0)
+
+        if self.scatter_lidar_points is None:
+            self.scatter_lidar_points = self.ax_cam.scatter(
+                u, v, c=rgba, s=size, marker=".", linewidths=0, zorder=1  # zorder bas : sous les clusters
+            )
+        else:
+            self.scatter_lidar_points.set_offsets(np.column_stack((u, v)))
+            self.scatter_lidar_points.set_facecolor(rgba)
+            self.scatter_lidar_points.set_sizes(size)

@@ -46,7 +46,7 @@ def main(folder_path, background, output_video, output_json):
     print(os.path.isdir(folder_path))
 
     with writer.saving(viewer.fig, output_video, dpi=200):
-        for i in range(20, 50):
+        for i in range(25, 50):
             print(f"Frame: {i}/{len(raw_files)}")
 
             frame = processor.process(i)

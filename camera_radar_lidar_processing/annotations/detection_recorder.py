@@ -19,6 +19,7 @@ class DetectionRecorder:
                 "cy": det.get("center", (None, None))[1],
                 "width": det.get("width"),
                 "height": det.get("height"),
+                "class": det.get("class")
             }
             for det in frame.master_detections
         ]
@@ -44,7 +45,10 @@ class DetectionRecorder:
                 "radar_mps": float(velocity_bins[d_bin]) / 3.6,
             })
 
-        self.json_data.setdefault(self.folder_name, {})[str(frame.i)] = {
+        self.json_data.setdefault(self.folder_name, {})[str(frame.t_radar)] = {
+            "t_radar": frame.t_radar,
+            "t_camera": frame.t_camera,
+            "t_lidar": frame.t_lidar,
             "camera_detections": camera_entries,
             "lidar_clusters": lidar_entries,
             "radar_clusters": radar_entries,

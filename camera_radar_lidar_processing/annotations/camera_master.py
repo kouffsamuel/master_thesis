@@ -36,7 +36,7 @@ class CameraMaster(MasterSource):
                     "bbox": (float(x1), float(y1), float(x2), float(y2)),
                     "width": float(w),
                     "height": float(h),
-                    "name": name,
+                    "class": name,
                 })
         return detections
 

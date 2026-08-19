@@ -21,6 +21,8 @@ class RealTimeViewer:
         self.paused = False
         self.panels = list(panels)
         self.save_dir = Path("/home/skouff/master_thesis/camera_calibration/new_calibration_files_paper")
+        self.save_counter= 0
+        self.las_cam_img = None
 
 
         self.ax = {}
@@ -73,18 +75,22 @@ class RealTimeViewer:
                 ax.set_aspect("equal", adjustable="box")
                 ax.grid(True)
 
-    def _save_fig(self):
+    def _save_camera_image(self):
+        if self.last_cam_img is None:
+            print("Pas d'image caméra à sauvegarder.")
+            return
+
         self.save_counter += 1
         filename = os.path.join(self.save_dir, f"frame_{self.save_counter:04d}.png")
-        self.fig.savefig(filename, dpi=150, bbox_inches="tight")
-        print(f"Figure sauvegardée : {filename}")
+        plt.imsave(filename, self.last_cam_img)
+        print(f"Image caméra sauvegardée : {filename}")
 
     def on_key(self, event):
         if event.key == 'p':
             self.paused = not self.paused
             print("Paused" if self.paused else "Resuming")
         elif event.key == 'f':
-            self._save_fig()
+            self._save_camera_image()
         elif event.key == 'q':
             print("Quitting...")
             plt.close('all')
@@ -183,6 +189,7 @@ class RealTimeViewer:
 
     def render_camera(self, t, img, bboxes_data):
         ax = self.ax["cam"]
+        self.last_cam_img = img
         if "cam" not in self.im:
             self.im["cam"] = ax.imshow(img)
         else:

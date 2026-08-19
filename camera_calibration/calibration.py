@@ -6,7 +6,7 @@ import os
 
 
 def calibrate():
-    cam_files = glob.glob(os.path.join("/DATA_MUSE/camera_calibration_files/camera/", "*.jpeg"))
+    cam_files = glob.glob(os.path.join("/DATA_MUSE/calibration_files_plexi/", "*.jpg"))
 
     # Init checkerboard
     nRows = 7
@@ -41,12 +41,30 @@ def calibrate():
     cv2.destroyAllWindows()
 
     # Calibrate
-    repError, camMatrix, distCoeff, rvecs, tvecs = cv2.calibrateCamera(worldPtsList, imgPtsList, imgGray.shape[::-1], None, None)
+    # width, height = 1920, 1080
+    # hfov_guess_deg = 62.2
+    # vfov_guess_deg = 48.8
+
+    # fx_guess = width  / (2 * np.tan(np.radians(hfov_guess_deg) / 2))
+    # fy_guess = height / (2 * np.tan(np.radians(vfov_guess_deg) / 2))
+
+    # cam_matrix_guess = np.array([
+    #     [fx_guess, 0,        width / 2],
+    #     [0,        fy_guess, height / 2],
+    #     [0,        0,        1]
+    # ], dtype=np.float64)
+    # dist_coeffs_guess = np.zeros(5, dtype=np.float64)  # ou tes coeffs existants si tu en as
+
+    repError, camMatrix, distCoeff, rvecs, tvecs = cv2.calibrateCamera(worldPtsList, imgPtsList, (1920,1080), None, None)
+
+    for i, tvec in enumerate(tvecs):
+        print(f"Image {i}: distance Z estimée = {tvec[2][0]:.1f} (unité = celle de ton square_size)")
+
     print("Camera Matrix:\n", camMatrix)
     print("Reproj Error (pixels): {:.4f}".format(repError))
 
     # Save Calibration
-    param_path = os.path.join("/home/skouff/master_thesis/camera_calibration", "calibration_with_square_size.npz")
+    param_path = os.path.join("/home/skouff/master_thesis/camera_calibration", "calibration_plexi.npz")
     np.savez(param_path, repError=repError, camMatrix=camMatrix, distCoeff=distCoeff, rvecs=rvecs, tvecs=tvecs)
 
 if __name__ == "__main__":

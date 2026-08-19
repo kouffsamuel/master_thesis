@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 
 NEAR = 0
-LIDAR_TO_CAM_TRANSLATION = np.array([0.0, -0.02, 0.18])
+LIDAR_TO_CAM_TRANSLATION = np.array([0.0, -0.02, 0.20])
 LIDAR_TO_RADAR_TRANSLATION = np.array([0.0, -0.01, 0.10])
 
 
