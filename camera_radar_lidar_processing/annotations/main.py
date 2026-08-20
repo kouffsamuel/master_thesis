@@ -5,6 +5,7 @@ from annotations.camera_master import CameraMaster
 from annotations.frame_data import FrameProcessor
 from annotations.detection_recorder import DetectionRecorder
 from annotations.real_time_viewer import RealTimeViewer
+from annotations.processed_data_recorder import ProcessedDataRecorder
 from matplotlib.animation import FFMpegWriter
 from pathlib import Path
 import os
@@ -16,6 +17,7 @@ def load_files(folder, ext):
     return files, times
 
 def main(folder_path, background, output_video, output_json):
+    folder_name = Path(folder_path).name
     dir_raw = Path(f"{folder_path}/radar")
     dir_camera = Path(f"{folder_path}/camera")
     dir_lidar = Path(f"{folder_path}/lidar")
@@ -38,8 +40,9 @@ def main(folder_path, background, output_video, output_json):
     )
 
     processor = FrameProcessor(master, raw_files, raw_times, cam_files, cam_times, lidar_files, lidar_times, background)
-    recorder = DetectionRecorder(Path(folder_path).name)
+    recorder = DetectionRecorder(folder_name)
     viewer = RealTimeViewer(cam_matrix, dist_coeff)
+    processed_data_recorder = ProcessedDataRecorder("/Benson_DATA3/Public/MUSE/synchronized_dataset/", folder_name)
 
     writer = FFMpegWriter(fps=14)
     print(folder_path)
@@ -51,6 +54,7 @@ def main(folder_path, background, output_video, output_json):
 
             frame = processor.process(i)
             viewer.update(frame)
+            processed_data_recorder.update(frame)
             recorder.record_frame(frame)
 
             

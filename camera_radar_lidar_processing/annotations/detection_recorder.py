@@ -28,7 +28,7 @@ class DetectionRecorder:
         for cluster in frame.clusters_lidar:
             center = cluster["center"]
             lidar_entries.append({
-                "detection_id": cluster.get("detection_id"),
+                "id": cluster.get("detection_id"),
                 "x_m": float(center[0]),
                 "y_m": float(center[1]),
                 "z_m": float(center[2]),
@@ -40,9 +40,9 @@ class DetectionRecorder:
             r_bin = int(np.clip(round(r_bin), 0, N - 1))
             d_bin = int(np.clip(round(d_bin), 0, N - 1))
             radar_entries.append({
-                "detection_id": cluster.get("detection_id"), 
+                "id": cluster.get("detection_id"), 
                 "radar_m": float(range_bins[r_bin]),
-                "radar_mps": float(velocity_bins[d_bin]) / 3.6,
+                "radar_kmh": float(velocity_bins[d_bin]),
             })
 
         self.json_data.setdefault(self.folder_name, {})[str(frame.t_radar)] = {
