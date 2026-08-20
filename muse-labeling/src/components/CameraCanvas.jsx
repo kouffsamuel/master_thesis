@@ -1,10 +1,26 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
+import { canvasTheme, trackColor } from '../utils/theme'
 
 const HANDLE_R = 6
 
+// La donnée est centre+taille (cx, cy, width, height) — ces deux helpers
+// ne servent qu'en interne pour le hit-test / drag, jamais stockés tels quels.
+const toCorners = (b) => ({
+  x1: b.cx - b.width / 2,
+  y1: b.cy - b.height / 2,
+  x2: b.cx + b.width / 2,
+  y2: b.cy + b.height / 2,
+})
+const fromCorners = (x1, y1, x2, y2) => ({
+  cx: (x1 + x2) / 2,
+  cy: (y1 + y2) / 2,
+  width: Math.abs(x2 - x1),
+  height: Math.abs(y2 - y1),
+})
+
 export default function CameraCanvas({
   imageURL, boxes, setBoxes, selectedBox, setSelectedBox, onBeforeEdit, linkMode,
-  brightness = 1
+  brightness = 1, theme="dark"
 }) {
   const canvasRef = useRef(null)
   const imgRef    = useRef(new Image())
@@ -63,12 +79,12 @@ export default function CameraCanvas({
   const hitHandle = (cx, cy) => {
     const { selectedBox, boxes } = stateRef.current
     if (selectedBox < 0) return null
-    const b = boxes[selectedBox]
+    const { x1, y1, x2, y2 } = toCorners(boxes[selectedBox])
     const corners = [
-      { corner:'tl', ix:b.pos1[0], iy:b.pos1[1] },
-      { corner:'tr', ix:b.pos2[0], iy:b.pos1[1] },
-      { corner:'bl', ix:b.pos1[0], iy:b.pos2[1] },
-      { corner:'br', ix:b.pos2[0], iy:b.pos2[1] },
+      { corner:'tl', ix:x1, iy:y1 },
+      { corner:'tr', ix:x2, iy:y1 },
+      { corner:'bl', ix:x1, iy:y2 },
+      { corner:'br', ix:x2, iy:y2 },
     ]
     for (const c of corners) {
       const { x, y } = toCanvas(c.ix, c.iy)
@@ -81,8 +97,8 @@ export default function CameraCanvas({
     const { boxes } = stateRef.current
     const { x:ix, y:iy } = toImg(cx, cy)
     for (let i = boxes.length-1; i >= 0; i--) {
-      const b = boxes[i]
-      if (ix >= b.pos1[0] && ix <= b.pos2[0] && iy >= b.pos1[1] && iy <= b.pos2[1]) return i
+      const { x1, y1, x2, y2 } = toCorners(boxes[i])
+      if (ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2) return i
     }
     return -1
   }
@@ -111,12 +127,17 @@ export default function CameraCanvas({
     } else if (drag.type === 'resize') {
       const { x:ix, y:iy } = toImg(pos.x, pos.y)
       setBoxes(prev => {
-        const next = prev.map(b => ({...b, pos1:[...b.pos1], pos2:[...b.pos2]}))
+        const next = prev.map(b => ({ ...b }))
         const b = next[drag.handle.boxIdx]
-        if (drag.handle.corner === 'tl') { b.pos1[0]=ix; b.pos1[1]=iy }
-        if (drag.handle.corner === 'tr') { b.pos2[0]=ix; b.pos1[1]=iy }
-        if (drag.handle.corner === 'bl') { b.pos1[0]=ix; b.pos2[1]=iy }
-        if (drag.handle.corner === 'br') { b.pos2[0]=ix; b.pos2[1]=iy }
+        const { x1, y1, x2, y2 } = toCorners(b)
+        // fixed corner = the one opposite the dragged corner
+        let fx = x1, fy = y1, nx = ix, ny = iy
+        if (drag.handle.corner === 'tl') { fx = x2; fy = y2 }
+        if (drag.handle.corner === 'tr') { fx = x1; fy = y2 }
+        if (drag.handle.corner === 'bl') { fx = x2; fy = y1 }
+        if (drag.handle.corner === 'br') { fx = x1; fy = y1 }
+        const merged = fromCorners(fx, fy, nx, ny)
+        next[drag.handle.boxIdx] = { ...b, ...merged }
         return next
       })
     }
@@ -130,12 +151,12 @@ export default function CameraCanvas({
       if (Math.abs(p2.x-p1.x) > 5 && Math.abs(p2.y-p1.y) > 5) {
         setBoxes(prev => {
           // assign next id = max existing id + 1 (ids start at 1 if none yet)
-          const maxId = prev.reduce((m, b) => Math.max(m, b.track_id ?? 0), 0)
-          const newBox = {
-            pos1: [Math.min(p1.x,p2.x), Math.min(p1.y,p2.y)],
-            pos2: [Math.max(p1.x,p2.x), Math.max(p1.y,p2.y)],
-            label: 'unknown', confidence: 1.0, track_id: maxId + 1, thickness: 2
-          }
+          const maxId = prev.reduce((m, b) => Math.max(m, b.id ?? 0), 0)
+          const { cx, cy, width, height } = fromCorners(
+            Math.min(p1.x,p2.x), Math.min(p1.y,p2.y),
+            Math.max(p1.x,p2.x), Math.max(p1.y,p2.y)
+          )
+          const newBox = { id: maxId + 1, cx, cy, width, height, class: 'unknown' }
           setSelectedBox(prev.length)
           return [...prev, newBox]
         })
@@ -145,6 +166,7 @@ export default function CameraCanvas({
   }
 
   const render = useCallback(() => {
+    const C = canvasTheme(theme)
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
@@ -165,18 +187,18 @@ export default function CameraCanvas({
     const { boxes, selectedBox } = stateRef.current
     boxes.forEach((b, i) => {
       const { scale, ox, oy } = getScale()
-      const x1 = b.pos1[0]*scale+ox, y1 = b.pos1[1]*scale+oy
-      const x2 = b.pos2[0]*scale+ox, y2 = b.pos2[1]*scale+oy
+      const { x1, y1, x2, y2 } = toCorners(b)
+      const cx1 = x1*scale+ox, cy1 = y1*scale+oy
+      const cx2 = x2*scale+ox, cy2 = y2*scale+oy
       const isSel = i === selectedBox
-      ctx.strokeStyle = isSel ? '#e94560' : '#2ecc71'
+      ctx.strokeStyle = isSel ? '#e94560' : trackColor(C, b.id)
       ctx.lineWidth   = isSel ? 2.5 : 1.5
-      ctx.strokeRect(x1,y1,x2-x1,y2-y1)
-      ctx.fillStyle = isSel ? '#e94560' : '#2ecc71'
+      ctx.strokeRect(cx1,cy1,cx2-cx1,cy2-cy1)
+      ctx.fillStyle = isSel ? '#e94560' : trackColor(C, b.id)
       ctx.font = '11px Segoe UI'
-      const confTxt = b.confidence != null && b.confidence < 1 ? ` (${(b.confidence*100).toFixed(0)}%)` : ''
-      ctx.fillText(`${b.label} #${b.track_id}${confTxt}`, x1+2, y1-4)
+      ctx.fillText(`${b.class} #${b.id}`, cx1+2, cy1-4)
       if (isSel) {
-        [[x1,y1],[x2,y1],[x1,y2],[x2,y2]].forEach(([hx,hy]) => {
+        [[cx1,cy1],[cx2,cy1],[cx1,cy2],[cx2,cy2]].forEach(([hx,hy]) => {
           ctx.fillStyle = '#e94560'
           ctx.beginPath(); ctx.arc(hx,hy,HANDLE_R,0,Math.PI*2); ctx.fill()
         })

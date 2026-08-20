@@ -118,8 +118,7 @@ body {
 .cell-rd      { grid-column: 1; grid-row: 1; }
 .cell-camera  { grid-column: 2; grid-row: 1; }
 .cell-panel   { grid-column: 3; grid-row: 1 / span 2; overflow-y: auto; }
-.cell-track   { grid-column: 1; grid-row: 2; }
-.cell-cluster { grid-column: 2; grid-row: 2; }
+.cell-lidar   { grid-column: 1 /3 ; grid-row: 2; }
 
 .cell {
   background: var(--bg2);

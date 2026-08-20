@@ -1,62 +1,112 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './RightPanel.css'
+
+function validateId (item, draft, items, selectedIndex, setDraft) {
+  if (!item) return null
+  const newId = parseInt(draft, 10)
+
+  if (Number.isNaN(newId) || newId === item.id) {
+    setDraft(String(item.id))
+    return null
+  }
+
+  if (items.some((x, i) => i !== selectedIndex && x.id === newId)) {
+    return null
+  }
+
+  return newId
+}
 
 export default function RightPanel({
   boxes, setBoxes, selectedBox, setSelectedBox,
-  radarDetections, selectedRadar, labeling,
-  pairPendingFor, boxLinkPendingFor,
-  onObject, onObjectNoBox, onNoise, onPair, onClear,
-  onAutoLabel, canAutoLabel,
-  autoLabelAlways, onToggleAutoLabelAlways,
-  labelHelpers,
+  radarDetections, selectedRadar, onRadarEdit,
   onSave, onBeforeEdit,
   onUndo, onRedo, canUndo, canRedo,
   logs
 }) {
   const logRef = useRef(null)
-  const { isObject, isNoise, isPaired, getPartner, getObjectBox } = labelHelpers
 
   const b = selectedBox >= 0 ? boxes[selectedBox] : null
   const d = selectedRadar >= 0 ? radarDetections[selectedRadar] : null
-  const radarId = d?.track_id
-
-  const objOn   = d != null && isObject(labeling, radarId)
-  const noiseOn = d != null && isNoise(labeling, radarId)
-  const paired  = d != null && isPaired(labeling, radarId)
-  const partner = d != null ? getPartner(labeling, radarId) : null
-  const objBox  = objOn ? getObjectBox(labeling, radarId) : undefined
-
-  const isPairPending = pairPendingFor === selectedRadar && pairPendingFor >= 0
-  const isBoxPending  = boxLinkPendingFor === selectedRadar && boxLinkPendingFor >= 0
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [logs])
 
+  // Camera Id
+
+  const [idDraft, setIdDraft] = useState('')
+  useEffect(() => { setIdDraft(b ? String(b.id) : '') }, [selectedBox, b?.id])
+  
+  const idConflict = b != null && idDraft !== '' && Number(idDraft) !== b.id && boxes.some((x, i) => i !== selectedBox && x.id === Number(idDraft))
+  const commitCameraId = () => {
+    const newId = validateId(b,idDraft, boxes,selectedBox, setIdDraft)
+    onBeforeEdit?.()
+    setBoxes(prev => {
+      const next = prev.map(x => ({ ...x }))
+      next[selectedBox].id = newId
+      return next
+    })
+  }
+
+  // Camera box field
+
   const setField = (field, val) => {
     if (selectedBox < 0) return
     onBeforeEdit?.()
     setBoxes(prev => {
-      const next = prev.map(b => ({...b, pos1:[...b.pos1], pos2:[...b.pos2]}))
-      if (field === 'x1') next[selectedBox].pos1[0] = val
-      if (field === 'y1') next[selectedBox].pos1[1] = val
-      if (field === 'x2') next[selectedBox].pos2[0] = val
-      if (field === 'y2') next[selectedBox].pos2[1] = val
+      const next = prev.map(b => ({ ...b }))
+      const box = next[selectedBox]
+      if (field === 'x1') { const x2 = box.cx + box.width / 2; box.cx = (val + x2) / 2; box.width = x2 - val }
+      if (field === 'y1') { const y2 = box.cy + box.height / 2; box.cy = (val + y2) / 2; box.height = y2 - val }
+      if (field === 'x2') { const x1 = box.cx - box.width / 2; box.cx = (x1 + val) / 2; box.width = val - x1 }
+      if (field === 'y2') { const y1 = box.cy - box.height / 2; box.cy = (y1 + val) / 2; box.height = val - y1 }
       return next
     })
   }
   const nudge = (field, delta) => {
     if (!b) return
-    const vals = { x1:b.pos1[0], y1:b.pos1[1], x2:b.pos2[0], y2:b.pos2[1] }
+    const x1 = b.cx - b.width / 2, y1 = b.cy - b.height / 2
+    const x2 = b.cx + b.width / 2, y2 = b.cy + b.height / 2
+    const vals = { x1, y1, x2, y2 }
     setField(field, vals[field] + delta)
   }
   const deleteBox = () => {
     if (selectedBox < 0) return
     onBeforeEdit?.()
-    setBoxes(prev => prev.filter((_,i) => i !== selectedBox))
+    setBoxes(prev => prev.filter((_, i) => i !== selectedBox))
     setSelectedBox(-1)
   }
 
+  // Radar field
+
+  const [radarIdDraft, setRadarIdDraft] = useState('')
+  const [velocityDraft, setVelocityDraft] = useState('')
+  const [rangeDraft, setRangeDraft] = useState('')
+
+  const radarIdConflict = d != null && radarIdDraft !== '' && Number(radarIdDraft) !== d.id && radarDetections.some((x, i) =>i !== selectedRadar && x.id === Number(radarIdDraft))
+
+
+  useEffect(() => {
+    if (d) {
+      setRadarIdDraft(String(d.id ?? ''))
+      setVelocityDraft(String(d.radar_kmh ?? ''))
+      setRangeDraft(String(d.radar_m ?? ''))
+    } else {
+      setRadarIdDraft('')
+      setVelocityDraft('')
+      setRangeDraft('')
+    }
+  }, [selectedRadar, d?.id, d?.radar_kmh, d?.radar_m])
+
+  // Radar ID
+  
+
+  const commitRadarId = () => {
+    const newId = validateId(d, radarIdDraft, radarDetections ,selectedRadar, setRadarIdDraft)
+    onBeforeEdit?.()
+    onRadarEdit(selectedRadar, 'id', newId)
+  }
   return (
     <div className="panel">
 
@@ -65,24 +115,41 @@ export default function RightPanel({
         <div className="panel-title">CAMERA BOX</div>
         {b ? (
           <>
-            <div className="box-info">box #{b.track_id}</div>
+            <div className="coord-row">
+              <label>id</label>
+              <input
+                type="number"
+                value={idDraft}
+                onChange={e => setIdDraft(e.target.value)}
+                onBlur={commitCameraId}
+                onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+                style={idConflict ? { borderColor: '#e94560' } : undefined}
+              />
+            </div>
+            {idConflict && <div className="pending-hint" style={{ color: '#e94560' }}>⚠ ID déjà utilisé dans cette frame</div>}
+
             <div className="coord-row">
               <label>type</label>
               <input
                 type="text"
-                value={b.label ?? ''}
+                value={b.class ?? ''}
                 placeholder="e.g. car, truck…"
                 onChange={e => {
                   onBeforeEdit?.()
                   setBoxes(prev => {
-                    const next = prev.map(x => ({...x}))
-                    next[selectedBox].label = e.target.value
+                    const next = prev.map(x => ({ ...x }))
+                    next[selectedBox].class = e.target.value
                     return next
                   })
                 }}
               />
             </div>
-            {[['x1', b.pos1[0]], ['y1', b.pos1[1]], ['x2', b.pos2[0]], ['y2', b.pos2[1]]].map(([field, val]) => (
+            {[
+              ['x1', b.cx - b.width / 2],
+              ['y1', b.cy - b.height / 2],
+              ['x2', b.cx + b.width / 2],
+              ['y2', b.cy + b.height / 2],
+            ].map(([field, val]) => (
               <div className="coord-row" key={field}>
                 <label>{field}</label>
                 <button className="spin" onClick={() => nudge(field, -1)}>−</button>
@@ -91,23 +158,6 @@ export default function RightPanel({
               </div>
             ))}
             <button className="delete-btn" onClick={deleteBox}>🗑 Delete box</button>
-              {b.original && (
-                <button
-                  className="restore-btn"
-                  onClick={() => {
-                    onBeforeEdit?.()
-                    setBoxes(prev => {
-                      const next = prev.map(x => ({...x, pos1:[...x.pos1], pos2:[...x.pos2]}))
-                      const o = next[selectedBox].original
-                      next[selectedBox].pos1 = [...o.pos1]
-                      next[selectedBox].pos2 = [...o.pos2]
-                      next[selectedBox].label = o.label
-                      if (o.confidence != null) next[selectedBox].confidence = o.confidence
-                      return next
-                    })
-                  }}
-                >↺ Restore original YOLO box</button>
-              )}
           </>
         ) : (
           <div className="empty-hint">Click a box to select<br/>or drag to draw a new one</div>
@@ -117,71 +167,43 @@ export default function RightPanel({
       {/* Radar labeler */}
       <div className="panel-section">
         <div className="panel-title">RADAR POINT</div>
-        {d ? (
-          <div className="box-info">
-            ID {radarId} — {d.is_confirmed ? 'confirmed' : 'unconfirmed'}
-            {d.energy != null && d.energy > 0 && (
-              <><br/><span className="tag tag-energy">⚡ {(10 * Math.log10(d.energy)).toFixed(1)} dB</span></>
-            )}
-            {objOn   && <><br/><span className="tag tag-object">○ object {objBox != null ? `→ box ${objBox}` : '(no box)'}</span></>}
-            {noiseOn && <><br/><span className="tag tag-noise">△ noise</span></>}
-            {paired  && <><br/><span className="tag tag-pair">□ paired with {partner}</span></>}
-          </div>
-        ) : (
-          <div className="empty-hint">Click a centroid (✕) to select a point</div>
-        )}
-
-        {isPairPending && <div className="pending-hint">⏳ Click the partner point (Esc to cancel)</div>}
-        {isBoxPending  && <div className="pending-hint">⏳ Click a box on the camera (Esc to cancel)</div>}
-
-        <div className="toggle-row">
-          <button className={`toggle-btn ${objOn ? 'lit-object' : 'dim'}`} onClick={onObject} disabled={!d}>
-            ○ Object {objOn && objBox != null ? `(box ${objBox})` : ''}
-          </button>
-          {d && !objOn && boxes.length > 0 && (
-            <button className="sub-btn" onClick={onObjectNoBox}>↳ object with no box</button>
-          )}
-          <button className={`toggle-btn ${paired ? 'lit-pair' : (isPairPending ? 'pending' : 'dim')}`} onClick={onPair} disabled={!d}>
-            {paired ? `□ Paired (#${partner})` : '□ Pair'}
-          </button>
-          <button className={`toggle-btn ${noiseOn ? 'lit-noise' : 'dim'}`} onClick={onNoise} disabled={!d}>
-            △ Noise
-          </button>
+          {d ? (
+            <>
+        <div className="coord-row">
+          <label>id</label>
+          <input type="number" value={radarIdDraft} onChange={e => setRadarIdDraft(e.target.value)}
+                onBlur={commitRadarId}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') e.target.blur()
+                }}
+                style={
+                  radarIdConflict
+                    ? { borderColor: '#e94560' }
+                    : undefined
+                }
+              />
         </div>
 
-        <button className="clear-all-btn" onClick={onClear} disabled={!d}>✕ Clear all</button>
-
-        <div className="hint" style={{marginTop:8}}>
-          Select a point, then toggle.<br/>
-          Object ↔ Noise mutually exclusive.<br/>
-          Noise cascades across a pair.<br/>
-          Object asks you to click a box.
+        <div className="coord-row">
+          <label>velocity</label>
+          <input type="text" value={d.radar_kmh != null ? `${d.radar_kmh.toFixed(2)} km/h` : ''} readOnly />
         </div>
+
+        <div className="coord-row">
+          <label>range</label>
+          <input type="text" value={d.radar_m != null ? `${d.radar_m.toFixed(2)} m` : ''} readOnly/>
+        </div>
+      </>
+    ) : (
+      <div className="empty-hint">
+        Click a centroid (✕) to select a point
+      </div>
+    )}
       </div>
 
       {/* Actions */}
       <div className="panel-section">
         <div className="panel-title">ACTIONS</div>
-        <button className="auto-label-btn" onClick={onAutoLabel} disabled={!canAutoLabel}>
-          ⚙ Auto-label this frame
-        </button>
-
-        <label
-          className={`switch-bar ${autoLabelAlways ? 'on' : ''} ${!canAutoLabel ? 'disabled' : ''}`}
-          title="Run Auto-label on every frame you move to. Frames that already carry labels are skipped, so your manual work is never overwritten."
-        >
-          <input
-            type="checkbox"
-            checked={autoLabelAlways}
-            onChange={onToggleAutoLabelAlways}
-            disabled={!canAutoLabel}
-          />
-          <span className="switch-track"><span className="switch-thumb" /></span>
-          <span className="switch-text">
-            Auto on frame change
-            <span className="switch-sub">{autoLabelAlways ? 'ON — applies on every frame' : 'OFF — manual only'}</span>
-          </span>
-        </label>
         <button className="save-btn" onClick={onSave}>💾 Save</button>
         <div className="undo-redo-row">
           <button className="undo-btn" onClick={onUndo} disabled={!canUndo}>↩ Undo</button>

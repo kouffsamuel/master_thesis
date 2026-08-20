@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import TopBar from './components/TopBar'
 import CameraCanvas from './components/CameraCanvas'
 import ClusterCanvas from './components/ClusterCanvas'
-import TrackCanvas from './components/TrackCanvas'
-import StaticImage from './components/StaticImage'
 import RDMapCanvas from './components/RDMapCanvas'
 import RightPanel from './components/RightPanel'
 import Toast from './components/Toast'
@@ -16,6 +14,7 @@ import {
 import { autoLabelFrame } from './utils/autoLabel'
 import { loadTheme, saveTheme } from './utils/theme'
 import './App.css'
+import LidarCanvas from './components/LidarCanvas'
 
 function frameIndexFromKey(key) {
   const m = key?.match(/frame_(\d+)\.jpeg/)
@@ -41,10 +40,9 @@ export default function App() {
   const [pairPendingFor,  setPairPendingFor]  = useState(-1)   // radar index awaiting partner
   const [boxLinkPendingFor, setBoxLinkPendingFor] = useState(-1) // radar index awaiting box click
 
-  // const [rdURL,     setRdURL]     = useState('')
   const [rdData,    setRdData]    = useState(null)   // Float32Array of rd_power
   const [cameraURL, setCameraURL] = useState('')
-  // const [cameraURL, setCameraURL] = useState('')
+
   const [toast,     setToast]     = useState(null)
   const [logs,       setLogs]     = useState([])
   // Display-only camera brightness (1 = original). Lives outside jsonData
@@ -74,11 +72,11 @@ export default function App() {
   const addLog = (msg) => setLogs(prev => [...prev.slice(-99), msg])
 
   // ── Derived view of current frame ──────────────────────────────────────
-  const currentFrameKey = frameKeys[frameIdx]
-  const frameData       = jsonData[currentFrameKey] || null
-  const boxesData       = frameData?.box_detections   || []
-  const radarDetections = frameData?.radar_detections || []
-  const trackHistory    = frameData?.track_history    || []
+  const currentFrame = frameKeys[frameIdx]
+  const frameData       = currentFrame ? (jsonData[currentFrame.session]?.[currentFrame.ts] ?? null) : null
+  const boxesData       = frameData?.camera_detections || []
+  const radarClusters = frameData?.radar_clusters  || []
+  const lidarDetections = frameData?.lidar_clusters || []
   const labeling        = normalizeLabeling(frameData?.labeling)
 
   // ── Undo / Redo: snapshot whole jsonData ───────────────────────────────
@@ -110,16 +108,24 @@ export default function App() {
     })
   }
 
-  const setBoxes = (updater) => {
-    setJsonData(prev => {
-      const key = frameKeys[frameIdx]
-      if (!key || !prev[key]) return prev
-      const frame = prev[key]
-      const prevBoxes = frame.box_detections || []
-      const newBoxes = typeof updater === 'function' ? updater(prevBoxes) : updater
-      return { ...prev, [key]: { ...frame, box_detections: newBoxes } }
-    })
-  }
+const setBoxes = (updater) => {
+  setJsonData(prev => {
+    const cur = frameKeys[frameIdx]
+    if (!cur) return prev
+    const sessionObj = prev[cur.session]
+    const frame = sessionObj?.[cur.ts]
+    if (!frame) return prev
+    const prevBoxes = frame.camera_detections || []
+    const newBoxes = typeof updater === 'function' ? updater(prevBoxes) : updater
+    return {
+      ...prev,
+      [cur.session]: {
+        ...sessionObj,
+        [cur.ts]: { ...frame, camera_detections: newBoxes }
+      }
+    }
+  })
+}
 
   const setLabeling = (newLabeling) => patchFrame({ labeling: newLabeling })
 
@@ -127,10 +133,16 @@ export default function App() {
   const openFolder = async () => {
     try {
       const dh = await window.showDirectoryPicker({ mode: 'readwrite' })
-      const jh = await dh.getFileHandle('yolo_tracking_data.json')
+      const jh = await dh.getFileHandle('labels.json')
       const jf = await jh.getFile()
+
       const data = JSON.parse(await jf.text())
-      const keys = Object.keys(data).sort()
+      
+      const keys = Object.keys(data).sort().flatMap(session =>
+      Object.keys(data[session])
+        .sort((a, b) => parseFloat(a) - parseFloat(b))
+        .map(ts => ({ session, ts }))
+      )
       setDirHandle(dh)
       setJsonData(data)
       setFrameKeys(keys)
@@ -165,26 +177,48 @@ export default function App() {
   
   // ── Fetch images + RD raw (independent of label edits) ─────────────────
   useEffect(() => {
-    if (!dirHandle || !frameKeys.length) return
-    const key = frameKeys[frameIdx]
-    const fi = padIndex(frameIndexFromKey(key))
-    const rdRawPath = jsonData[key]?.rd_raw_file
-    ;(async () => {
-      setCameraURL(await getFileURL(dirHandle, `camera/frame_${fi}_camera.jpeg`))
-      if (rdRawPath) {
-        setRdData(await getFileFloat32(dirHandle, rdRawPath))
-      } else {
-        setRdData(null)
+  if (!dirHandle || !frameKeys.length) return
+  const cur = frameKeys[frameIdx]
+  const frame = cur ? jsonData[cur.session]?.[cur.ts] : null
+
+  const tCamera   = frame?.t_camera
+  const tRadar = frame?.t_radar
+  ;(async () => {
+    if (tCamera != null) {
+      const path = `camera/${tCamera}.jpeg`
+      
+      try {
+        setCameraURL(await getFileURL(dirHandle, path))
+      } catch (e) {
+        setCameraURL('')
+        addLog(`[Error] Camera image not found: ${path} (${e.message})`)
       }
-      addLog(`[Frame ${fi}] Loaded`)
-    })()
-  }, [frameIdx, dirHandle, frameKeys])
+    } else {
+      setCameraURL('')
+      addLog(`[Warn] Frame ${cur?.session}/${cur?.ts} has no t_camera`)
+    }
+
+    if (tRadar != null) {
+      const path = `radar/${tRadar}.raw`
+      try{
+        setRdData(await getFileFloat32(dirHandle, path))
+      }catch(e){
+        setRdData('')
+        addLog(`[Error] Radar data not found: ${path} (${e.message})`)
+      }
+    } else {
+      setRdData('')
+      addLog(`[Warn] Frame ${cur?.session}/${cur?.ts} has no t_radar`)
+    }
+    addLog(`[Frame ${cur ? `${cur.session}/${cur.ts}` : '?'}] Loaded`)
+  })()
+}, [frameIdx, dirHandle, frameKeys])
 
   // ── Save ────────────────────────────────────────────────────────────────
   const save = useCallback(async () => {
     if (!dirHandle) return
     try {
-      const fh = await dirHandle.getFileHandle('yolo_tracking_data.json', { create: true })
+      const fh = await dirHandle.getFileHandle('labels.json', { create: true })
       const w  = await fh.createWritable()
       await w.write(JSON.stringify(jsonData, null, 2))
       await w.close()
@@ -206,15 +240,24 @@ export default function App() {
       if (e.key === 'ArrowLeft')  gotoFrame(frameIdx - 1)
       if (e.key === 'ArrowRight') gotoFrame(frameIdx + 1)
       if (e.key === 'Escape') { setPairPendingFor(-1); setBoxLinkPendingFor(-1) }
-      if (e.key === 'Delete' && selectedBox >= 0) {
-        pushHistory()
-        setBoxes(prev => prev.filter((_, i) => i !== selectedBox))
-        setSelectedBox(-1)
+      if (e.key === 'Delete') {
+        if (selectedBox >= 0) {
+          pushHistory()
+          setBoxes(prev => prev.filter((_, i) => i !== selectedBox))
+          setSelectedBox(-1)
+          return
+        }
+
+        if (selectedRadar >= 0) {
+          handleRadarDelete(selectedRadar)
+          return
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [frameIdx, save, undo, redo, selectedBox, pushHistory])
+
+  }, [ frameIdx, save, undo, redo, selectedBox,selectedRadar, pushHistory])
 
   const gotoFrame = (idx) => {
     if (!frameKeys.length) return
@@ -227,157 +270,176 @@ export default function App() {
   }
 
   // ── Radar point click ────────────────────────────────────────────────────
-  const handleRadarClick = (idx) => {
-    const radarId = radarDetections[idx]?.track_id
+  const handleRadarCreate = ({radar_kmh, radar_m}) => {
+    const clusters = frameData?.radar_clusters || []
+    const usedIds = new Set(clusters.map(c => c.id))
 
-    // completing a pair link
-    if (pairPendingFor >= 0) {
-      if (pairPendingFor === idx) {
-        setPairPendingFor(-1)
-        addLog(`[Radar ${radarId}] Pair cancelled`)
-        return
-      }
-      const idA = radarDetections[pairPendingFor]?.track_id
-      pushHistory()
-      setLabeling(linkPair(labeling, idA, radarId))
-      addLog(`[Pair] Radar ${idA} ↔ Radar ${radarId} linked`)
-      setPairPendingFor(-1)
-      setSelectedRadar(idx)
-      return
+    let newId = 0
+    while(usedIds.has(newId)){
+      newId++
     }
 
-    setSelectedRadar(idx)
+    const newCluster = {
+      id:newId,
+      radar_kmh,
+      radar_m
+    }
+
+    pushHistory()
+
+    setJsonData(prev => {
+      const cur = frameKeys[frameIdx]
+      if (!cur) return prev
+
+      const sessionObj = prev[cur.session]
+      const frame = sessionObj?.[cur.ts]
+
+      if(!frame) return prev
+
+      return {
+        ...prev,
+        [cur.session]: {
+          ...sessionObj,
+          [cur.ts]: {
+            ...frame,
+            radar_clusters: [
+              ...(frame.radar_clusters || []),
+              newCluster
+            ]
+          }
+        }
+      }
+    })
+
+    setSelectedRadar(clusters.length)
+
+    addLog(
+      `[Radar] Cluster ${newId} created at ` +
+      `${radar_kmh.toFixed(2)} km/h, ${radar_m.toFixed(2)} m`
+    )
+  }
+
+  const handleRadarMove = (index, radar_kmh, radar_m) => {
+    setJsonData(prev => {
+      const cur = frameKeys[frameIdx]
+      if (!cur) return prev
+
+      const sessionObj = prev[cur.session]
+      const frame = sessionObj?.[cur.ts]
+      if (!frame) return prev
+
+      const clusters = frame.radar_clusters || []
+
+      if (!clusters[index]) return prev
+
+      const newClusters = clusters.map((cluster, i) =>
+        i === index
+          ? {
+              ...cluster,
+              radar_kmh,
+              radar_m
+            }
+          : cluster
+      )
+
+      return {
+        ...prev,
+        [cur.session]: {
+          ...sessionObj,
+          [cur.ts]: {
+            ...frame,
+            radar_clusters: newClusters
+          }
+        }
+      }
+    })
+  }
+
+  const handleRadarDelete = (index) => {
+    if (index == null || index < 0) return
+
+    const cluster = radarClusters[index]
+    if (!cluster) return
+
+    pushHistory()
+
+    setJsonData(prev => {
+      const cur = frameKeys[frameIdx]
+      if (!cur) return prev
+
+      const sessionObj = prev[cur.session]
+      const frame = sessionObj?.[cur.ts]
+      if (!frame) return prev
+
+      const clusters = frame.radar_clusters || []
+
+      return {
+        ...prev,
+        [cur.session]: {
+          ...sessionObj,
+          [cur.ts]: {
+            ...frame,
+            radar_clusters: clusters.filter((_, i) => i !== index)
+          }
+        }
+      }
+    })
+
+    setSelectedRadar(-1)
+
+    addLog(`[Radar] Cluster ${cluster.id} deleted`)
+  }
+
+  const handleRadarMoveStart = () => {
+    pushHistory()
   }
 
   // ── Box click (used both for normal select AND for object→box linking) ──
   const handleBoxClick = (idx) => {
-    if (boxLinkPendingFor >= 0) {
-      const radarId = radarDetections[boxLinkPendingFor]?.track_id
-      const boxId   = boxesData[idx]?.track_id
-      pushHistory()
-      setLabeling(toggleObject(
-        isObject(labeling, radarId) ? unlinkObjectFirst(labeling, radarId) : labeling,
-        radarId, boxId
-      ))
-      addLog(`[Object] Radar ${radarId} → Box ${boxId}`)
-      setBoxLinkPendingFor(-1)
-      setSelectedBox(idx)
-      return
-    }
     setSelectedBox(idx)
   }
 
-  // helper: if already object, ensure toggleObject re-adds with new box
-  const unlinkObjectFirst = (l, radarId) => toggleObject(l, radarId)
+  const handleRadarEdit = (index, field, value) => {
+    setJsonData(prev => {
+      const cur = frameKeys[frameIdx]
+      if (!cur) return prev
 
-  // ── Right-panel actions on the selected radar point ─────────────────────
-  const selRadarId = selectedRadar >= 0 ? radarDetections[selectedRadar]?.track_id : null
+      const sessionObj = prev[cur.session]
+      const frame = sessionObj?.[cur.ts]
 
-  const actObject = () => {
-    if (selRadarId == null) return
-    if (isObject(labeling, selRadarId)) {
-      // turning OFF
-      pushHistory()
-      setLabeling(toggleObject(labeling, selRadarId))
-      addLog(`[Radar ${selRadarId}] object removed`)
-    } else {
-      // turning ON — need to pick a box (or set null if no boxes)
-      if (boxesData.length === 0) {
-        pushHistory()
-        setLabeling(toggleObject(labeling, selRadarId, null))
-        addLog(`[Radar ${selRadarId}] object (no box this frame)`)
-      } else {
-        setBoxLinkPendingFor(selectedRadar)
-        addLog(`[Radar ${selRadarId}] object armed — click a box (or Esc for null)`)
+      if (!frame) return prev
+
+      const clusters = frame.radar_clusters || []
+
+      if (!clusters[index]) return prev
+
+      const newClusters = clusters.map((cluster, i) =>
+        i === index
+          ? {
+              ...cluster,
+              [field]: value
+            }
+          : cluster
+      )
+
+      return {
+        ...prev,
+        [cur.session]: {
+          ...sessionObj,
+          [cur.ts]: {
+            ...frame,
+            radar_clusters: newClusters
+          }
+        }
       }
-    }
+    })
   }
 
-  // set object with null box explicitly (button for "object, no matching box")
-  const actObjectNoBox = () => {
-    if (selRadarId == null) return
-    pushHistory()
-    const l = isObject(labeling, selRadarId)
-      ? toggleObject(toggleObject(labeling, selRadarId), selRadarId, null) // off then on(null)
-      : toggleObject(labeling, selRadarId, null)
-    setLabeling(l)
-    setBoxLinkPendingFor(-1)
-    addLog(`[Radar ${selRadarId}] object (no box)`)
-  }
-
-  const actNoise = () => {
-    if (selRadarId == null) return
-    pushHistory()
-    setLabeling(toggleNoise(labeling, selRadarId))
-    const partner = getPartner(labeling, selRadarId)
-    addLog(partner != null
-      ? `[Radar ${selRadarId}] noise toggled (cascaded to paired ${partner})`
-      : `[Radar ${selRadarId}] noise toggled`)
-  }
-
-  const actPair = () => {
-    if (selRadarId == null) return
-    if (isPaired(labeling, selRadarId)) {
-      pushHistory()
-      setLabeling(unlinkPair(labeling, selRadarId))
-      addLog(`[Radar ${selRadarId}] pair unlinked`)
-    } else {
-      setPairPendingFor(selectedRadar)
-      addLog(`[Radar ${selRadarId}] pair armed — click partner point`)
-    }
-  }
-
-  const actClear = () => {
-    if (selRadarId == null) return
-    pushHistory()
-    setLabeling(clearRadar(labeling, selRadarId))
-    addLog(`[Radar ${selRadarId}] all labels cleared`)
-  }
-
-  // ── Auto-label: run the algorithm on the current frame ──────────────────
-  // ONE pushHistory + ONE setLabeling = one undo step. Ctrl+Z restores the
-  // entire pre-button state. The algorithm output replaces the frame's
-  // labeling wholesale (deterministic and idempotent).
-  // opts.skipIfLabeled — used by the auto-on-frame-change switch: the algorithm
-  // replaces a frame's labeling wholesale, so re-running it on a frame someone
-  // already corrected by hand would silently wipe that work just by navigating
-  // back to it. Explicit runs (button / switching the toggle on) always apply.
-  const runAutoLabel = (opts = {}) => {
-    if (!frameData) return
-    if (opts.skipIfLabeled && hasLabels(frameData.labeling)) {
-      addLog(`[Auto] Frame ${frameData.frame_index} already labeled — skipped`)
-      return
-    }
-    pushHistory()
-    // labeling = decisions (noise + pairs) -> jsonData, one undo step.
-    // suggestions = Stage 3 hints -> display state only, never saved.
-    const { labeling: auto, suggestions: sug } = autoLabelFrame(frameData)
-    setLabeling(auto)
-    setSuggestions(sug)
-    addLog(
-      `[Auto] noise: ${auto.noise.length}, pairs: ${auto.pairs.length}, ` +
-      `candidates: ${sug.candidates.length}` +
-      (sug.needsReview ? ' — ⚠ sensors disagree, please review' : '')
-    )
-  }
-
-  // Switch flip: turning it ON applies to the frame you're looking at right
-  // away (that run is explicit, so it overwrites even a labeled frame — one
-  // Ctrl+Z undoes it).
-  const toggleAutoLabelAlways = () => {
-    const next = !autoLabelAlways
-    setAutoLabelAlways(next)
-    addLog(`[Auto] auto-apply on frame change ${next ? 'ON' : 'OFF'}`)
-    if (next) runAutoLabel()
-  }
 
   // Frame changed (or a folder was just opened) with the switch on.
   // Declared after the selection-reset effect on purpose: effects fire in
   // declaration order, so `suggestions` is cleared before this refills it.
-  useEffect(() => {
-    if (!autoAlwaysRef.current) return
-    runAutoLabel({ skipIfLabeled: true })
-
+  useEffect(() => { 
   }, [frameIdx, frameKeys])
 
   // ── Progress ─────────────────────────────────────────────────────────────
@@ -402,7 +464,15 @@ export default function App() {
         <div className="cell cell-rd">
           <div className="cell-title">Range-Doppler Map</div>
           {/* <div className="cell-body"><StaticImage src={rdURL} alt="RD map" /></div> */}
-          <div className="cell-body"><RDMapCanvas data={rdData} theme={theme} /></div>
+          <div className="cell-body">
+            <RDMapCanvas data={rdData} 
+            radarClusters={radarClusters} 
+            selectedRadar={selectedRadar} 
+            onRadarSelect={setSelectedRadar}
+            onRadarCreate={handleRadarCreate}
+            onRadarMove={handleRadarMove}
+            onRadarMoveStart={handleRadarMoveStart}
+            theme={theme} /></div>
         </div>
 
         <div className="cell cell-camera">
@@ -443,21 +513,11 @@ export default function App() {
             setBoxes={setBoxes}
             selectedBox={selectedBox}
             setSelectedBox={setSelectedBox}
-            radarDetections={radarDetections}
+
+            radarDetections={radarClusters}
             selectedRadar={selectedRadar}
-            labeling={labeling}
-            pairPendingFor={pairPendingFor}
-            boxLinkPendingFor={boxLinkPendingFor}
-            onObject={actObject}
-            onObjectNoBox={actObjectNoBox}
-            onNoise={actNoise}
-            onPair={actPair}
-            onClear={actClear}
-            onAutoLabel={() => runAutoLabel()}
-            canAutoLabel={!!frameData}
-            autoLabelAlways={autoLabelAlways}
-            onToggleAutoLabelAlways={toggleAutoLabelAlways}
-            labelHelpers={{ isObject, isNoise, isPaired, getPartner, getObjectBox }}
+            onRadarEdit={handleRadarEdit}
+
             onSave={save}
             onBeforeEdit={pushHistory}
             onUndo={undo}
@@ -468,12 +528,12 @@ export default function App() {
           />
         </div>
 
-        <div className="cell cell-track">
-          <div className="cell-title">Track History</div>
-          <div className="cell-body"><TrackCanvas trackHistory={trackHistory} theme={theme} /></div>
+        <div className="cell cell-lidar">
+          <div className="cell-title">Lidar data</div>
+          {/* <div className="cell-body"><LidarCanvas  theme={theme} /></div> */}
         </div>
 
-        <div className="cell cell-cluster">
+        {/* <div className="cell cell-cluster">
           <div className="cell-title">Radar Detections — click ✕ to select</div>
           <div className="cell-body">
             <ClusterCanvas
@@ -487,7 +547,7 @@ export default function App() {
               theme={theme}
             />
           </div>
-        </div>
+        </div> */}
       </div>
 
       {toast && <Toast msg={toast.msg} isError={toast.isError} />}

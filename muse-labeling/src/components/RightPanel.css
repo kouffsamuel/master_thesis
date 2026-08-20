@@ -54,7 +54,7 @@
 .coord-row label {
   font-size: 11px;
   color: var(--text-dim);
-  width: 30px;
+  min-width: 70px;
   flex-shrink: 0;
 }
 .coord-row input {
