@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import './TopBar.css'
 
 export default function TopBar({
-  onOpen, frameIdx, frameTotal, frameData, onPrev, onNext, onJump, labeled,
+  onOpen, frameIdx, frameTotal, frameData, onPrev, onNext, onJump,
   theme, onToggleTheme
 }) {
   const [jumpVal, setJumpVal] = useState('')
@@ -10,7 +10,7 @@ export default function TopBar({
   useEffect(() => { setJumpVal(String(frameIdx + 1)) }, [frameIdx])
 
   const frameLabel = frameData
-    ? `Frame ${String(frameData.frame_index).padStart(5,'0')}`
+    ? `Frame ${String(frameData.t_radar)}`
     : 'No folder opened'
 
   const handleJumpKey = (e) => {
@@ -49,10 +49,6 @@ export default function TopBar({
           </span>
         )}
       </div>
-
-      {frameTotal > 0 && (
-        <span className="progress-label">Labeled: {labeled} / {frameTotal}</span>
-      )}
     </div>
   )
 }

@@ -3,8 +3,6 @@ import { canvasTheme, trackColor } from '../utils/theme'
 
 const HANDLE_R = 6
 
-// La donnée est centre+taille (cx, cy, width, height) — ces deux helpers
-// ne servent qu'en interne pour le hit-test / drag, jamais stockés tels quels.
 const toCorners = (b) => ({
   x1: b.cx - b.width / 2,
   y1: b.cy - b.height / 2,

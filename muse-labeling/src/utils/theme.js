@@ -47,10 +47,11 @@ const DARK = {
   tick:      '#555',      // tick + axis labels
   rdWhite:   255,         // RD map gray_r white point (low power) — see RDMapCanvas
   marker:    '#ffffff',   // selected / pending highlight
-  sel:       '#e94560',   // selection ring
+  sel:       '#e94560',   // selection ring; also LidarCanvas's projected camera-frame rectangle
   candidate: '#f0c419',   // Stage 3 dashed ring
   obj:       '#2ecc71',
   noise:     '#7f8c8d',
+  lidarPoint:'#7fd1ff',   // LidarCanvas fallback dot colour when a point has no r/g/b
   track:     TAB20,
   pair:      PAIR_PALETTE,
 }
@@ -72,6 +73,7 @@ const LIGHT = {
   candidate: '#b8860b',
   obj:       darken('#2ecc71', 0.38),
   noise:     darken('#7f8c8d', 0.38),
+  lidarPoint:darken('#7fd1ff', 0.35),
   // 0.45, not the 0.32 that suited the markers alone: these same colours draw
   // the "ID n" labels, and tab20's pale half (#c7c7c7, #dbdb8d, #9edae5…)
   // was illegible as text on the light background at anything shallower.

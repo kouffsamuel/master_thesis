@@ -20,14 +20,16 @@ function validateId (item, draft, items, selectedIndex, setDraft) {
 export default function RightPanel({
   boxes, setBoxes, selectedBox, setSelectedBox,
   radarDetections, selectedRadar, onRadarEdit,
+  lidarClusters, selectedLidar, onLidarEdit,
   onSave, onBeforeEdit,
   onUndo, onRedo, canUndo, canRedo,
   logs
 }) {
   const logRef = useRef(null)
 
-  const b = selectedBox >= 0 ? boxes[selectedBox] : null
-  const d = selectedRadar >= 0 ? radarDetections[selectedRadar] : null
+  const box = selectedBox >= 0 ? boxes[selectedBox] : null
+  const radarCluster = selectedRadar >= 0 ? radarDetections[selectedRadar] : null
+  const lidarPoint = selectedLidar >= 0 ? lidarClusters[selectedLidar]: null
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
@@ -36,11 +38,11 @@ export default function RightPanel({
   // Camera Id
 
   const [idDraft, setIdDraft] = useState('')
-  useEffect(() => { setIdDraft(b ? String(b.id) : '') }, [selectedBox, b?.id])
+  useEffect(() => { setIdDraft(box ? String(box.id) : '') }, [selectedBox, box?.id])
   
-  const idConflict = b != null && idDraft !== '' && Number(idDraft) !== b.id && boxes.some((x, i) => i !== selectedBox && x.id === Number(idDraft))
+  const idConflict = box != null && idDraft !== '' && Number(idDraft) !== box.id && boxes.some((x, i) => i !== selectedBox && x.id === Number(idDraft))
   const commitCameraId = () => {
-    const newId = validateId(b,idDraft, boxes,selectedBox, setIdDraft)
+    const newId = validateId(box,idDraft, boxes,selectedBox, setIdDraft)
     onBeforeEdit?.()
     setBoxes(prev => {
       const next = prev.map(x => ({ ...x }))
@@ -65,9 +67,9 @@ export default function RightPanel({
     })
   }
   const nudge = (field, delta) => {
-    if (!b) return
-    const x1 = b.cx - b.width / 2, y1 = b.cy - b.height / 2
-    const x2 = b.cx + b.width / 2, y2 = b.cy + b.height / 2
+    if (!box) return
+    const x1 = box.cx - box.width / 2, y1 = box.cy - box.height / 2
+    const x2 = box.cx + box.width / 2, y2 = box.cy + box.height / 2
     const vals = { x1, y1, x2, y2 }
     setField(field, vals[field] + delta)
   }
@@ -84,36 +86,56 @@ export default function RightPanel({
   const [velocityDraft, setVelocityDraft] = useState('')
   const [rangeDraft, setRangeDraft] = useState('')
 
-  const radarIdConflict = d != null && radarIdDraft !== '' && Number(radarIdDraft) !== d.id && radarDetections.some((x, i) =>i !== selectedRadar && x.id === Number(radarIdDraft))
+  const radarIdConflict = radarCluster != null && radarIdDraft !== '' && Number(radarIdDraft) !== radarCluster.id && radarDetections.some((x, i) =>i !== selectedRadar && x.id === Number(radarIdDraft))
 
 
   useEffect(() => {
-    if (d) {
-      setRadarIdDraft(String(d.id ?? ''))
-      setVelocityDraft(String(d.radar_kmh ?? ''))
-      setRangeDraft(String(d.radar_m ?? ''))
+    if (radarCluster) {
+      setRadarIdDraft(String(radarCluster.id ?? ''))
+      setVelocityDraft(String(radarCluster.radar_kmh ?? ''))
+      setRangeDraft(String(radarCluster.radar_m ?? ''))
     } else {
       setRadarIdDraft('')
       setVelocityDraft('')
       setRangeDraft('')
     }
-  }, [selectedRadar, d?.id, d?.radar_kmh, d?.radar_m])
+  }, [selectedRadar, radarCluster?.id, radarCluster?.radar_kmh, radarCluster?.radar_m])
 
   // Radar ID
-  
-
   const commitRadarId = () => {
-    const newId = validateId(d, radarIdDraft, radarDetections ,selectedRadar, setRadarIdDraft)
+    const newId = validateId(radarCluster, radarIdDraft, radarDetections ,selectedRadar, setRadarIdDraft)
     onBeforeEdit?.()
     onRadarEdit(selectedRadar, 'id', newId)
   }
+
+  //LiDAR ID
+
+  const [lidarIdDraft, setLidarIdDraft] = useState('')
+
+  const lidarIdConflict = lidarPoint != null && lidarIdDraft !== '' && Number(lidarIdDraft) !== lidarPoint.id && lidarClusters.some((x, i) =>i !== selectedLidar && x.id === Number(lidarIdDraft))
+
+
+  useEffect(() => {
+    if(lidarPoint){
+      setLidarIdDraft(String(lidarPoint.id ?? ''))
+    }else{
+      setLidarIdDraft('')
+    }
+  }, [selectedLidar, lidarPoint?.id])
+
+  const commitLidarId = () => {
+    const newId = validateId(lidarPoint, lidarIdDraft, lidarClusters ,selectedLidar, setLidarIdDraft)
+    onBeforeEdit?.()
+    onLidarEdit(selectedLidar, 'id', newId)
+  }
+
   return (
     <div className="panel">
 
       {/* Camera box editor */}
       <div className="panel-section">
         <div className="panel-title">CAMERA BOX</div>
-        {b ? (
+        {box ? (
           <>
             <div className="coord-row">
               <label>id</label>
@@ -132,7 +154,7 @@ export default function RightPanel({
               <label>type</label>
               <input
                 type="text"
-                value={b.class ?? ''}
+                value={box.class ?? ''}
                 placeholder="e.g. car, truck…"
                 onChange={e => {
                   onBeforeEdit?.()
@@ -145,10 +167,10 @@ export default function RightPanel({
               />
             </div>
             {[
-              ['x1', b.cx - b.width / 2],
-              ['y1', b.cy - b.height / 2],
-              ['x2', b.cx + b.width / 2],
-              ['y2', b.cy + b.height / 2],
+              ['x1', box.cx - box.width / 2],
+              ['y1', box.cy - box.height / 2],
+              ['x2', box.cx + box.width / 2],
+              ['y2', box.cy + box.height / 2],
             ].map(([field, val]) => (
               <div className="coord-row" key={field}>
                 <label>{field}</label>
@@ -167,7 +189,7 @@ export default function RightPanel({
       {/* Radar labeler */}
       <div className="panel-section">
         <div className="panel-title">RADAR POINT</div>
-          {d ? (
+          {radarCluster ? (
             <>
         <div className="coord-row">
           <label>id</label>
@@ -183,15 +205,16 @@ export default function RightPanel({
                 }
               />
         </div>
+        {radarIdConflict && <div className="pending-hint" style={{ color: '#e94560' }}>⚠ ID déjà utilisé dans cette frame</div>}
 
         <div className="coord-row">
           <label>velocity</label>
-          <input type="text" value={d.radar_kmh != null ? `${d.radar_kmh.toFixed(2)} km/h` : ''} readOnly />
+          <input type="text" value={radarCluster.radar_kmh != null ? `${radarCluster.radar_kmh.toFixed(2)} km/h` : ''} readOnly />
         </div>
 
         <div className="coord-row">
           <label>range</label>
-          <input type="text" value={d.radar_m != null ? `${d.radar_m.toFixed(2)} m` : ''} readOnly/>
+          <input type="text" value={radarCluster.radar_m != null ? `${radarCluster.radar_m.toFixed(2)} m` : ''} readOnly/>
         </div>
       </>
     ) : (
@@ -200,6 +223,31 @@ export default function RightPanel({
       </div>
     )}
       </div>
+      <div className="panel-section">
+        <div className="panel-title">LIDAR POINT</div>
+        {lidarPoint ? (<>
+        <div className="coord-row">
+          <label>id</label>
+          <input type="number" value={lidarIdDraft} onChange={e => setLidarIdDraft(e.target.value)}
+                onBlur={commitLidarId}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') e.target.blur()
+                }}
+                style={
+                  radarIdConflict
+                    ? { borderColor: '#e94560' }
+                    : undefined
+                }
+              />
+        </div>
+        {lidarIdConflict && <div className="pending-hint" style={{ color: '#e94560' }}>⚠ ID déjà utilisé dans cette frame</div>}
+        </>):
+        <div className="empty-hint">
+          Click on a LiDAR cluster to select a point
+        </div>
+        }
+      </div>
+      
 
       {/* Actions */}
       <div className="panel-section">

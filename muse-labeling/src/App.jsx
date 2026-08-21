@@ -1,25 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import TopBar from './components/TopBar'
 import CameraCanvas from './components/CameraCanvas'
-import ClusterCanvas from './components/ClusterCanvas'
 import RDMapCanvas from './components/RDMapCanvas'
 import RightPanel from './components/RightPanel'
 import Toast from './components/Toast'
-import { getFileURL, getFileFloat32, padIndex } from './utils/fs'
-import {
-  normalizeLabeling, emptyLabeling,
-  isObject, isNoise, getPartner, isPaired, getObjectBox,
-  toggleObject, toggleNoise, linkPair, unlinkPair, clearRadar
-} from './utils/labeling'
-import { autoLabelFrame } from './utils/autoLabel'
+import { getFileURL, getFileFloat32, getPlyPoints } from './utils/fs'
 import { loadTheme, saveTheme } from './utils/theme'
 import './App.css'
 import LidarCanvas from './components/LidarCanvas'
 
-function frameIndexFromKey(key) {
-  const m = key?.match(/frame_(\d+)\.jpeg/)
-  return m ? parseInt(m[1], 10) : 0
-}
 
 // A frame counts as labeled once it carries any decision at all.
 function hasLabels(l) {
@@ -37,11 +26,13 @@ export default function App() {
 
   const [selectedBox,     setSelectedBox]     = useState(-1)
   const [selectedRadar,   setSelectedRadar]   = useState(-1)   // index into radar_detections
+  const [selectedLidar,   setSelectedLidar]   = useState(-1)
   const [pairPendingFor,  setPairPendingFor]  = useState(-1)   // radar index awaiting partner
   const [boxLinkPendingFor, setBoxLinkPendingFor] = useState(-1) // radar index awaiting box click
 
   const [rdData,    setRdData]    = useState(null)   // Float32Array of rd_power
   const [cameraURL, setCameraURL] = useState('')
+  const [lidarData, setLidarData] = useState([])
 
   const [toast,     setToast]     = useState(null)
   const [logs,       setLogs]     = useState([])
@@ -76,8 +67,7 @@ export default function App() {
   const frameData       = currentFrame ? (jsonData[currentFrame.session]?.[currentFrame.ts] ?? null) : null
   const boxesData       = frameData?.camera_detections || []
   const radarClusters = frameData?.radar_clusters  || []
-  const lidarDetections = frameData?.lidar_clusters || []
-  const labeling        = normalizeLabeling(frameData?.labeling)
+  const lidarClusters = frameData?.lidar_clusters || []
 
   // ── Undo / Redo: snapshot whole jsonData ───────────────────────────────
   const pushHistory = useCallback(() => {
@@ -158,6 +148,7 @@ const setBoxes = (updater) => {
   useEffect(() => {
     setSelectedBox(-1)
     setSelectedRadar(-1)
+    setSelectedLidar(-1)
     setPairPendingFor(-1)
     setBoxLinkPendingFor(-1)
     setSuggestions(null)   // algorithm suggestions live per-frame only
@@ -175,7 +166,7 @@ const setBoxes = (updater) => {
   //   })()
   // }, [frameIdx, dirHandle, frameKeys])
   
-  // ── Fetch images + RD raw (independent of label edits) ─────────────────
+  // ── Fetch images + RD raw + Lidar points (independent of label edits) ─────────────────
   useEffect(() => {
   if (!dirHandle || !frameKeys.length) return
   const cur = frameKeys[frameIdx]
@@ -183,10 +174,13 @@ const setBoxes = (updater) => {
 
   const tCamera   = frame?.t_camera
   const tRadar = frame?.t_radar
+  const tLidar = frame?.t_lidar
+
   ;(async () => {
     if (tCamera != null) {
       const path = `camera/${tCamera}.jpeg`
       
+      // Load camera 
       try {
         setCameraURL(await getFileURL(dirHandle, path))
       } catch (e) {
@@ -198,6 +192,7 @@ const setBoxes = (updater) => {
       addLog(`[Warn] Frame ${cur?.session}/${cur?.ts} has no t_camera`)
     }
 
+    // Load Radar
     if (tRadar != null) {
       const path = `radar/${tRadar}.raw`
       try{
@@ -210,6 +205,23 @@ const setBoxes = (updater) => {
       setRdData('')
       addLog(`[Warn] Frame ${cur?.session}/${cur?.ts} has no t_radar`)
     }
+
+    // Load Lidar
+    if (tLidar != null) {
+      const path = `lidar/${tLidar}.ply`
+
+      try {
+        setLidarData(await getPlyPoints(dirHandle, path))
+      } catch (e) {
+        setLidarData([])
+        addLog(`[Error] Lidar data not found: ${path} (${e.message})`)
+      }
+    } else {
+      setLidarData([])
+      addLog(`[Warn] Frame ${cur?.session}/${cur?.ts} has no tLidar`)
+    }
+
+
     addLog(`[Frame ${cur ? `${cur.session}/${cur.ts}` : '?'}] Loaded`)
   })()
 }, [frameIdx, dirHandle, frameKeys])
@@ -252,12 +264,16 @@ const setBoxes = (updater) => {
           handleRadarDelete(selectedRadar)
           return
         }
+        if (selectedLidar >= 0){
+          handleLidarDelete(selectedLidar)
+          return
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
 
-  }, [ frameIdx, save, undo, redo, selectedBox,selectedRadar, pushHistory])
+  }, [ frameIdx, save, undo, redo, selectedBox,selectedRadar, selectedLidar, pushHistory])
 
   const gotoFrame = (idx) => {
     if (!frameKeys.length) return
@@ -435,6 +451,77 @@ const setBoxes = (updater) => {
     })
   }
 
+  const handleLidarEdit = (index, field, value) => {
+    setJsonData(prev => {
+      const cur = frameKeys[frameIdx]
+      if (!cur) return prev
+
+      const sessionObj = prev[cur.session]
+      const frame = sessionObj?.[cur.ts]
+
+      if (!frame) return prev
+
+      const clusters = frame.lidar_clusters || []
+
+      if (!clusters[index]) return prev
+
+      const newClusters = clusters.map((cluster, i) =>
+        i === index
+          ? {
+              ...cluster,
+              [field]: value
+            }
+          : cluster
+      )
+
+      return {
+        ...prev,
+        [cur.session]: {
+          ...sessionObj,
+          [cur.ts]: {
+            ...frame,
+            lidar_clusters: newClusters
+          }
+        }
+      }
+    })
+  }
+
+  const handleLidarDelete = (index) => {
+    if (index == null || index < 0) return
+
+    const cluster = lidarClusters[index]
+    if (!cluster) return
+
+    pushHistory()
+
+    setJsonData(prev => {
+      const cur = frameKeys[frameIdx]
+      if (!cur) return prev
+
+      const sessionObj = prev[cur.session]
+      const frame = sessionObj?.[cur.ts]
+      if (!frame) return prev
+
+      const clusters = frame.lidar_clusters || []
+
+      return {
+        ...prev,
+        [cur.session]: {
+          ...sessionObj,
+          [cur.ts]: {
+            ...frame,
+            lidar_clusters: clusters.filter((_, i) => i !== index)
+          }
+        }
+      }
+    })
+
+    setSelectedLidar(-1)
+
+    addLog(`[Lidar] Cluster ${cluster.id} deleted`)
+  }
+
 
   // Frame changed (or a folder was just opened) with the switch on.
   // Declared after the selection-reset effect on purpose: effects fire in
@@ -442,8 +529,6 @@ const setBoxes = (updater) => {
   useEffect(() => { 
   }, [frameIdx, frameKeys])
 
-  // ── Progress ─────────────────────────────────────────────────────────────
-  const labeledCount = frameKeys.filter(k => hasLabels(jsonData[k]?.labeling)).length
 
   return (
     <div className="app">
@@ -455,7 +540,6 @@ const setBoxes = (updater) => {
         onPrev={() => gotoFrame(frameIdx - 1)}
         onNext={() => gotoFrame(frameIdx + 1)}
         onJump={gotoFrame}
-        labeled={labeledCount}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -517,6 +601,10 @@ const setBoxes = (updater) => {
             radarDetections={radarClusters}
             selectedRadar={selectedRadar}
             onRadarEdit={handleRadarEdit}
+            
+            lidarClusters={lidarClusters}
+            selectedLidar={selectedLidar}
+            onLidarEdit={handleLidarEdit}
 
             onSave={save}
             onBeforeEdit={pushHistory}
@@ -530,7 +618,7 @@ const setBoxes = (updater) => {
 
         <div className="cell cell-lidar">
           <div className="cell-title">Lidar data</div>
-          {/* <div className="cell-body"><LidarCanvas  theme={theme} /></div> */}
+          <div className="cell-body"><LidarCanvas points={lidarData} clusters={lidarClusters} selectedCluster={selectedLidar} onClusterSelect={setSelectedLidar} theme={theme} /></div>
         </div>
 
         {/* <div className="cell cell-cluster">
