@@ -123,7 +123,11 @@ export default function CameraCanvas({
     if (drag.type === 'new') {
       setDrag(d => ({ ...d, current: pos }))
     } else if (drag.type === 'resize') {
-      const { x:ix, y:iy } = toImg(pos.x, pos.y)
+      const { x:ixRaw, y:iyRaw } = toImg(pos.x, pos.y)
+      const maxX = imgRef.current.naturalWidth
+      const maxY = imgRef.current.naturalHeight
+      const ix = Math.max(0, Math.min(maxX, ixRaw))
+      const iy = Math.max(0, Math.min(maxY, iyRaw))
       setBoxes(prev => {
         const next = prev.map(b => ({ ...b }))
         const b = next[drag.handle.boxIdx]
@@ -144,8 +148,21 @@ export default function CameraCanvas({
   const onMouseUp = (e) => {
     if (!drag) return
     if (drag.type === 'new' && drag.current) {
-      const p1 = toImg(drag.start.x,   drag.start.y)
-      const p2 = toImg(drag.current.x, drag.current.y)
+      const p1Raw = toImg(drag.start.x, drag.start.y)
+      const p2Raw = toImg(drag.current.x, drag.current.y)
+
+      const maxX = imgRef.current.naturalWidth
+      const maxY = imgRef.current.naturalHeight
+
+      const p1 = {
+        x: Math.max(0, Math.min(maxX, p1Raw.x)),
+        y: Math.max(0, Math.min(maxY, p1Raw.y)),
+      }
+
+      const p2 = {
+        x: Math.max(0, Math.min(maxX, p2Raw.x)),
+        y: Math.max(0, Math.min(maxY, p2Raw.y)),
+      }
       if (Math.abs(p2.x-p1.x) > 5 && Math.abs(p2.y-p1.y) > 5) {
         setBoxes(prev => {
           // assign next id = max existing id + 1 (ids start at 1 if none yet)

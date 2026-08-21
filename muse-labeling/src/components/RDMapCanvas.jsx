@@ -73,12 +73,29 @@
   }
 
   function canvasToRadar(mx, my, frame) {
-    const {size, offsetX, offsetY} = frame
+    const { size, offsetX, offsetY } = frame
     const plotSize = size - 2 * PAD
-    const velocity = VEL_MIN + ((mx - offsetX - PAD) / plotSize) * (VEL_MAX - VEL_MIN)
-    const range = RNG_MAX -((my - offsetY - PAD) / plotSize) * (RNG_MAX - RNG_MIN)
 
-    return { velocity, range}
+    const velocityRaw = VEL_MIN +((mx - offsetX - PAD) / plotSize) * (VEL_MAX - VEL_MIN)
+
+    const rangeRaw = RNG_MAX -((my - offsetY - PAD) / plotSize) * (RNG_MAX - RNG_MIN)
+
+    const velocity = Math.max(VEL_MIN, Math.min(VEL_MAX, velocityRaw))
+
+    const range = Math.max(RNG_MIN,Math.min(RNG_MAX, rangeRaw))
+
+    return { velocity, range }
+  }
+
+  function isInsideRDMap(mx, my, frame){
+    const { size, offsetX, offsetY } = frame
+
+    return (
+      mx >= offsetX + PAD &&
+      mx <= offsetX + size - PAD &&
+      my >= offsetY + PAD &&
+      my <= offsetY + size - PAD
+    )
   }
 
   export default function RDMapCanvas({data, radarClusters, selectedRadar, onRadarSelect, onRadarCreate, onRadarMove, onRadarMoveStart, theme = 'dark'}) {
@@ -288,6 +305,10 @@
       const frame = getSquareFrame(canvasRef.current)
       const index = findClusterAtMouse(radarClusters, mx, my, frame)
 
+      if (!isInsideRDMap(mx, my, frame)) {
+        return
+      }
+
       if (index >= 0) {
         onRadarSelect(index)
         onRadarMoveStart()
@@ -329,6 +350,10 @@
 
       if (!didDrag) {
         const frame = getSquareFrame(canvasRef.current)
+        
+        if (!isInsideRDMap(mx, my, frame)) {
+          return
+        }
 
         const { velocity, range } = canvasToRadar(mx, my, frame)
 
