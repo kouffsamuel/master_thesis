@@ -1,0 +1,94 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage[ruled,vlined]{algorithm2e}
+
+\begin{document}
+
+\begin{algorithm}[t]
+\caption{Stage 1: Fixed-Noise Position Gating}
+\label{alg:stage1}
+\KwIn{detections $D$; noise region $R$; energy bound $E_{hi}$}
+\KwOut{per-point labels}
+
+\ForEach{$d \in D$}{
+    \uIf{$d \notin R$}{\textbf{pass}\;}
+    \uElseIf{$E_d > E_{hi}$}{\textbf{pass} \tcp*{possible object}}
+    \uElseIf{$\exists\, p \in \mathrm{hist}(d) : p \notin R$}{\textbf{pass} \tcp*{moved in}}
+    \Else{$d \to \textit{noise}$\;}
+}
+\end{algorithm}
+
+% \begin{algorithm}[t]
+% \caption{Stage 2: Mirror Pairing}
+% \label{alg:stage2}
+% \KwIn{surviving detections $D'$; tolerances $\varepsilon_v, \varepsilon_r$; weight $\lambda$}
+% \KwOut{pair relations; mirror identities}
+
+% $C \leftarrow \emptyset$\;
+% \ForEach{$(a, b) \in D' \times D',\ r_a < r_b$}{
+%     \uIf{$|v_a + v_b| < \varepsilon_v \wedge |r_a - r_b| < \varepsilon_r$}{
+%         $C[a][b] \leftarrow |v_a + v_b| + \lambda\,|r_a - r_b|$\;
+%     }
+%     \Else{
+%         $C[a][b] \leftarrow \infty$ \tcp*{not a candidate}
+%     }
+% }
+% $P \leftarrow \mathrm{Hungarian}(C)$ \tcp*{globally optimal 1-to-1}
+% \ForEach{$(a, b) \in P$}{
+%     link $(a, b)$ as pair\;
+%     \uIf{$E_a > E_b$}{
+%         $\mathrm{label}(b) \leftarrow \mathrm{label}(a)$ \tcp*{$b$ is mirror}
+%     }
+%     \Else{
+%         mirror $\leftarrow$ \textit{undecided} \tcp*{energy contradicts range}
+%     }
+% }
+% \end{algorithm}
+
+\begin{algorithm}[t]
+\caption{Stage 2: Mirror Pairing}
+\label{alg:stage2}
+\KwIn{detections $D$ (incl.\ Stage-1 noise); tolerances $\varepsilon_v, \varepsilon_r$; symmetry constant $C$; weight $\lambda$}
+\KwOut{pair relations; label cascade}
+
+\ForEach{$(a, b) \in D \times D$}{
+    \uIf{$|v_a + v_b| < \varepsilon_v \wedge |r_a + r_b - C| < \varepsilon_r$}{
+        $M[a][b] \leftarrow |v_a + v_b| + \lambda\,|r_a + r_b - C|$\;
+    }
+    \Else{
+        $M[a][b] \leftarrow \infty$ \tcp*{not a candidate}
+    }
+}
+$P \leftarrow \mathrm{Hungarian}(M)$ \tcp*{globally optimal 1-to-1}
+\ForEach{$(a, b) \in P$}{
+    link $(a, b)$ as pair\;
+    \uIf{exactly one of $a, b$ is labeled \textit{noise}}{
+        propagate \textit{noise} to the other \tcp*{cascade}
+    }
+}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{Stage 3: Object Candidate Nomination}
+\label{alg:stage3}
+\KwIn{surviving confirmed detections $D'$; boxes $B$; threshold $\theta_s$; window $k$}
+\KwOut{candidate set $\mathcal{C}$; review flag}
+
+$\mathcal{C} \leftarrow \emptyset$\;
+\ForEach{$d \in D'$}{
+    \uIf{$d$ is the weaker member of a pair}{
+        \textbf{skip} \tcp*{mirror never competes}
+    }
+    \uElseIf{$|\mathrm{hist}(d)| < k$}{
+        \textbf{skip} \tcp*{too little history}
+    }
+    \Else{
+        $\sigma \leftarrow \mathrm{std}\big(\Delta v_{t-k+1..t}(d)\big)$\;
+        \lIf{$1/(1+\sigma) > \theta_s$}{$\mathcal{C} \leftarrow \mathcal{C} \cup \{d\}$}
+    }
+}
+$\mathit{flag} \leftarrow (\mathcal{C} = \emptyset \wedge B \neq \emptyset) \vee (\mathcal{C} \neq \emptyset \wedge B = \emptyset)$ \tcp*{sensors disagree}
+point--box association $\rightarrow$ human\;
+\end{algorithm}
+
+\end{document}

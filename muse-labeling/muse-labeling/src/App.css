@@ -1,0 +1,165 @@
+/* Dark is the default; [data-theme="light"] on <html> overrides it.
+   Every hard-coded colour in TopBar.css / RightPanel.css was replaced by one
+   of these, so a new mode only means adding another block below. */
+:root, :root[data-theme="dark"] {
+  --bg:        #1a1a2e;   /* app background */
+  --bg2:       #16213e;   /* cell / topbar surface */
+  --bg3:       #11182b;   /* recessed surface (toggle buttons) */
+  --inset:     #0d1117;   /* deepest inset (log box) */
+  --accent:    #e94560;
+  --accent-hover: #c0392b;
+  --on-accent: #fff;
+  --border:    #0f3460;
+  --border-hover: #555;
+  --btn-bg:    #0f3460;
+  --text:      #e0e0e0;
+  --text-muted:#aaa;
+  --text-dim:  #888;
+  --text-faint:#555;
+  --text-ghost:#333;
+  --green:     #2ecc71;
+  --orange:    #f39c12;
+  --gray:      #7f8c8d;
+  --log-text:  #4ec9b0;
+  --tag-energy:#5dade2;
+
+  --danger:        #e74c3c;
+  --danger-border: #7f1d1d;
+  --danger-hover:  #7f1d1d;
+  --info:          #5dade2;
+  --info-border:   #2c5f7f;
+  --info-hover:    #1a3a4f;
+  --auto:          #b08fe8;
+  --auto-border:   #7d5fb2;
+  --auto-hover:    #2a1f3d;
+
+  --toggle-dim-fg: #555;    /* Object / Noise / Pair when the flag is off */
+  --lit-object-bg: #1a472a; --lit-object-fg: #2ecc71; --lit-object-bd: #27ae60;
+  --lit-noise-bg:  #2c2c2c; --lit-noise-fg:  #95a5a6; --lit-noise-bd:  #7f8c8d;
+  --lit-pair-bg:   #4a2c00; --lit-pair-fg:   #f39c12; --lit-pair-bd:   #e67e22;
+  --pending-bg:    #2c2c0d; --pending-fg:    #f1c40f; --pending-bd:    #f1c40f;
+}
+
+:root[data-theme="light"] {
+  --bg:        #eef1f6;
+  --bg2:       #ffffff;
+  --bg3:       #f4f6fa;
+  --inset:     #f8fafc;
+  /* Text runs deliberately darker than a straight inversion of the dark
+     palette: this UI is mostly 10–11px labels, and small type loses apparent
+     contrast on a pale background much faster than body text does. */
+  --accent:    #a8123a;
+  --accent-hover: #86082c;
+  --on-accent: #fff;
+  --border:    #d3dae5;
+  --border-hover: #7c8899;
+  --btn-bg:    #e6ebf3;
+  --text:      #10141d;
+  --text-muted:#2b3444;
+  --text-dim:  #3a4454;
+  --text-faint:#4d5766;
+  --text-ghost:#6b7585;
+  --green:     #147a43;
+  --orange:    #8a5a04;
+  --gray:      #4d5766;
+  --log-text:  #0a5148;
+  --tag-energy:#12557f;
+
+  --danger:        #9b2418;
+  --danger-border: #e0a89f;
+  --danger-hover:  #fbe9e7;
+  --info:          #12557f;
+  --info-border:   #9dbdd6;
+  --info-hover:    #e8f1f8;
+  --auto:          #4d2b82;
+  --auto-border:   #b39fd6;
+  --auto-hover:    #f2edfa;
+
+  /* Darker than the dark-mode equivalents on purpose — these read against a
+     pale tint, so the label needs the contrast the bright hues can't give. */
+  --toggle-dim-fg: #4a5364;
+  --lit-object-bg: #e4f7ec; --lit-object-fg: #0b5133; --lit-object-bd: #27ae60;
+  --lit-noise-bg:  #eceff3; --lit-noise-fg:  #2f3841; --lit-noise-bd:  #9aa7b8;
+  --lit-pair-bg:   #fdf1dd; --lit-pair-fg:   #7a4602; --lit-pair-bd:   #e67e22;
+  --pending-bg:    #fdf8dc; --pending-fg:    #6b5408; --pending-bd:    #d4ac0d;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.15s, color 0.15s;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Main grid ── */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 260px;
+  /* grid-template-rows: 1fr 1fr; */
+  grid-template-rows: 1fr 1.2fr;
+  gap: 6px;
+  padding: 6px;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cell-rd      { grid-column: 1; grid-row: 1; }
+.cell-camera  { grid-column: 2; grid-row: 1; }
+.cell-panel   { grid-column: 3; grid-row: 1 / span 2; overflow-y: auto; }
+.cell-lidar   { grid-column: 1 /3 ; grid-row: 2; }
+
+.cell {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cell-title {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.cell-body {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Light-mode legibility.
+   Almost every label here is 10–11px. Below ~11px, dark-on-light type reads
+   noticeably thinner than the same size light-on-dark (the light background
+   bleeds into the glyph edges), so past a point more darkness stops helping
+   and weight is what buys back readability. These are the smallest labels. */
+:root[data-theme="light"] .cell-title,
+:root[data-theme="light"] .hint,
+:root[data-theme="light"] .empty-hint,
+:root[data-theme="light"] .box-info,
+:root[data-theme="light"] .progress-label,
+:root[data-theme="light"] .frame-label,
+:root[data-theme="light"] .frame-jump,
+:root[data-theme="light"] .switch-text,
+:root[data-theme="light"] .switch-sub,
+:root[data-theme="light"] .coord-row label,
+:root[data-theme="light"] .log-box {
+  font-weight: 500;
+}
